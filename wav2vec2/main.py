@@ -3,54 +3,63 @@ import os
 from glob import glob
 import gc
 import pickle
+
+from transformers.models.wav2vec2.tokenization_wav2vec2 import Wav2Vec2CTCTokenizer
 from gpuinfo import get_gpu_info
 import pprint
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from torch import nn
-from torchvision import models
 from torch.utils.data import DataLoader
 
 import nsml
-from nsml import HAS_DATASET, DATASET_PATH
+from nsml import DATASET_PATH
 
-from transformers import AutoTokenizer, Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2Processor
-from datasets import Dataset, DatasetDict
+from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2Processor
+from datasets import load_metric
 
 from data import prepare_dataset
 
-print('torch version: ',torch.__version__)
+print('torch version: ', torch.__version__)
+
 
 def evaluate(model, imgs):
     model.to(device)
     # as the target is english, the first word to the transformer should be the
     # english start token.
     tokenizer = dict_for_infer['tokenizer']
-    decoder_input = torch.tensor([tokenizer.txt2idx['<sos>']] * imgs.size(0), dtype=torch.long).to(device)
+    decoder_input = torch.tensor([tokenizer.txt2idx['<sos>']] * imgs.size(0),
+                                 dtype=torch.long).to(device)
     output = decoder_input.unsqueeze(1).to(device)
     enc_output = None
     for i in range(max_length + 1):
         # predictions.shape == (batch_size, seq_len, vocab_size)
         with torch.no_grad():
             # predictions, attention_weights, enc_output = transformer([imgs, output, enc_output])
-            predictions, attention_weights, enc_output = model([imgs, output, enc_output])
+            predictions, attention_weights, enc_output = model(
+                [imgs, output, enc_output])
         # select the last token from the seq_len dimension
         predictions_ = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
 
-        predicted_id = torch.tensor(torch.argmax(predictions_, axis=-1), dtype=torch.int32)
+        predicted_id = torch.tensor(torch.argmax(predictions_, axis=-1),
+                                    dtype=torch.int32)
 
         output = torch.cat([output, predicted_id], dim=-1)
     output = output.cpu().numpy()
 
     result_list = []
     token_list = []
-    for token in output:
-        summary = tokenizer.convert(token)
+
+    for tokens in output:
+        summary = tokenizer.convert(tokens)
         result_list.append(summary)
-        token_list.append(token)
+        token_list.append(tokens)
 
     return result_list, token_list
 
@@ -81,7 +90,7 @@ def train_step(batch_item, training):
             # output, _, _ = transformer([src, tar_inp, None])
             loss = loss_function(tar_real, output)
         acc = accuracy_function(tar_real, output)
-        
+
         return loss, acc
 
 
@@ -103,23 +112,27 @@ def accuracy_function(real, pred):
 
     return torch.sum(accuracies) / torch.sum(mask)
 
-def path_loader(root_path, is_test= False):
+
+def path_loader(root_path, is_test=False):
 
     if is_test:
-        file_list = sorted(glob(os.path.join(root_path, 'test_data', '*')))
+        test_path = os.path.join(root_path, 'test')
+        file_list = sorted(glob(os.path.join(test_path, 'test_data', '*')))
 
         return file_list
 
-    if args.mode == 'train' :
+    if args.mode == 'train':
         train_path = os.path.join(root_path, 'train')
         file_list = sorted(glob(os.path.join(train_path, 'train_data', '*')))
         label = pd.read_csv(os.path.join(train_path, 'train_label'))
 
-    return file_list, label
+        return file_list, label
+
 
 def save_checkpoint(checkpoint, dir):
 
     torch.save(checkpoint, os.path.join(dir))
+
 
 def bind_model(model, parser):
     # 학습한 모델을 저장하는 함수입니다.
@@ -128,7 +141,7 @@ def bind_model(model, parser):
         os.makedirs(dir_name, exist_ok=True)
         save_dir = os.path.join(dir_name, 'checkpoint')
         save_checkpoint(dict_for_infer, save_dir)
-        
+
         with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
             pickle.dump(dict_for_infer, f)
 
@@ -147,24 +160,23 @@ def bind_model(model, parser):
         global dict_for_infer
         with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
             dict_for_infer = pickle.load(f)
-        
+
         print("로딩 완료!")
 
     def infer(test_path, **kwparser):
         device = checkpoint['device']
         test_file_list = path_loader(test_path, is_test=True)
         test_dataset = CustomDataset(test_file_list, None, 160000, 'test')
-        test_data_loader = DataLoader(test_dataset,
-                                      batch_size=10)
+        test_data_loader = DataLoader(test_dataset, batch_size=10)
         result_list = []
-        
+
         for step, batch in enumerate(test_data_loader):
             inp = batch['magnitude'].to(device)
             output, _ = evaluate(model, inp)
             result_list.extend(output)
 
         prob = [1] * len(result_list)
-        
+
         # DONOTCHANGE: They are reserved for nsml
         # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
         # return list(zip(pred.flatten(), clipped.flatten()))
@@ -173,6 +185,92 @@ def bind_model(model, parser):
     # DONOTCHANGE: They are reserved for nsml
     # nsml에서 지정한 함수에 접근할 수 있도록 하는 함수입니다.
     nsml.bind(save=save, load=load, infer=infer)
+
+
+def compute_metrics(pred):
+    wer_metric = load_metric("wer")
+    pred_logits = pred.predictions
+    pred_ids = np.argmax(pred_logits, axis=-1)
+
+    pred.label_ids[pred.label_ids == -100] = processor.tokenizer.pad_token_id
+
+    pred_str = processor.batch_decode(pred_ids)
+    # we do not want to group tokens when computing the metrics
+    label_str = processor.batch_decode(pred.label_ids, group_tokens=False)
+
+    wer = wer_metric.compute(predictions=pred_str, references=label_str)
+
+    return {"wer": wer}
+
+
+@dataclass
+class DataCollatorCTCWithPadding:
+    """
+    Data collator that will dynamically pad the inputs received.
+    Args:
+        processor (:class:`~transformers.Wav2Vec2Processor`)
+            The processor used for proccessing the data.
+        padding (:obj:`bool`, :obj:`str` or :class:`~transformers.tokenization_utils_base.PaddingStrategy`, `optional`, defaults to :obj:`True`):
+            Select a strategy to pad the returned sequences (according to the model's padding side and padding index)
+            among:
+            * :obj:`True` or :obj:`'longest'`: Pad to the longest sequence in the batch (or no padding if only a single
+              sequence if provided).
+            * :obj:`'max_length'`: Pad to a maximum length specified with the argument :obj:`max_length` or to the
+              maximum acceptable input length for the model if that argument is not provided.
+            * :obj:`False` or :obj:`'do_not_pad'` (default): No padding (i.e., can output a batch with sequences of
+              different lengths).
+        max_length (:obj:`int`, `optional`):
+            Maximum length of the ``input_values`` of the returned list and optionally padding length (see above).
+        max_length_labels (:obj:`int`, `optional`):
+            Maximum length of the ``labels`` returned list and optionally padding length (see above).
+        pad_to_multiple_of (:obj:`int`, `optional`):
+            If set will pad the sequence to a multiple of the provided value.
+            This is especially useful to enable the use of Tensor Cores on NVIDIA hardware with compute capability >=
+            7.5 (Volta).
+    """
+
+    processor: Wav2Vec2Processor
+    padding: Union[bool, str] = True
+    max_length: Optional[int] = None
+    max_length_labels: Optional[int] = None
+    pad_to_multiple_of: Optional[int] = None
+    pad_to_multiple_of_labels: Optional[int] = None
+
+    def __call__(
+        self, features: List[Dict[str, Union[List[int], torch.Tensor]]]
+    ) -> Dict[str, torch.Tensor]:
+        # split inputs and labels since they have to be of different lenghts and need
+        # different padding methods
+        input_features = [{
+            "input_values": feature["input_values"]
+        } for feature in features]
+        label_features = [{
+            "input_ids": feature["labels"]
+        } for feature in features]
+
+        batch = self.processor.pad(
+            input_features,
+            padding=self.padding,
+            max_length=self.max_length,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+            return_tensors="pt",
+        )
+        with self.processor.as_target_processor():
+            labels_batch = self.processor.pad(
+                label_features,
+                padding=self.padding,
+                max_length=self.max_length_labels,
+                pad_to_multiple_of=self.pad_to_multiple_of_labels,
+                return_tensors="pt",
+            )
+
+        # replace padding with -100 to ignore loss correctly
+        labels = labels_batch["input_ids"].masked_fill(
+            labels_batch.attention_mask.ne(1), -100)
+
+        batch["labels"] = labels
+
+        return batch
 
 
 if __name__ == '__main__':
@@ -189,42 +287,55 @@ if __name__ == '__main__':
     total_step = -1
     print(f"nsml report interval = {report_interval}")
 
-    
     epochs = args.epochs
-    learning_rate = 5e-5 # 5e-5
+    learning_rate = 5e-5  # 5e-5
     device = torch.device("cuda:0")
 
-    model = Wav2Vec2ForCTC.from_pretrained("fleek/wav2vec-large-xlsr-korean",gradient_checkpointing=True,ctc_loss_reduction='mean')
-    
+    model = Wav2Vec2ForCTC.from_pretrained(
+        "fleek/wav2vec-large-xlsr-korean",
+        gradient_checkpointing=True,
+        ctc_loss_reduction='mean',
+        attention_dropout=0.1,
+        hidden_dropout=0.1,
+        feat_proj_dropout=0.0,
+        mask_time_prob=0.05,
+        layerdrop=0.1,
+        gradient_checkpointing=True,
+        ctc_loss_reduction="mean",
+        pad_token_id=processor.tokenizer.pad_token_id,
+        vocab_size=len(processor.tokenizer))
+
     bind_model(model=model, parser=args)
-    if args.pause :
+    if args.pause:
         nsml.paused(scope=locals())
 
-    if args.mode == 'train' :
+    if args.mode == 'train':
         file_list, label = path_loader(DATASET_PATH)
 
-        split_num = int(len(label) * 0.9)
-        train_file_list = file_list[:split_num]
-        val_file_list = file_list[split_num:]
+        train_data, val_data = prepare_dataset(file_list, label)
 
-        train_label = label.iloc[:split_num]
-        val_label = label.iloc[split_num:]
+        tokenizer = Wav2Vec2CTCTokenizer('./vocab.json',
+                                         unk_token="[UNK]",
+                                         pad_token="[PAD]",
+                                         word_delimiter_token="|")
 
-        tokenizer = AutoTokenizer.from_pretrained("fleek/wav2vec-large-xlsr-korean")
-        feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0, do_normalize=True, return_attention_mask=False)
-        processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
-        print("Some example")
-        print(train_label[:5])
-        # label has column
-        # file_name, text
+        feature_extractor = Wav2Vec2FeatureExtractor(
+            feature_size=1,
+            sampling_rate=16000,
+            padding_value=0.0,
+            do_normalize=True,
+            return_attention_mask=False)
 
-        #data = DatasetDict.from_csv()
-        # TODO
-        data = prepare_dataset(arguments_here) 
+        processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
+                                      tokenizer=tokenizer)
+
+        print(train_data[0])
+
+        data_collator = DataCollatorCTCWithPadding(processor=processor,
+                                                   padding=True)
 
         # load model from session checkpoint
         #nsml.load(checkpoint='0', session='nia1030/stt_1/5')
-        
 
         model = model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -239,24 +350,25 @@ if __name__ == '__main__':
 
             training = True
             for step, batch in enumerate(train_dataloader):
-                if(step == total_step):  break
+                if (step == total_step): break
 
                 batch_loss, batch_acc, lr = train_step(batch, training)
                 total_train_loss += batch_loss
                 total_train_acc += batch_acc
                 if step == 0:
                     pprint.pprint(get_gpu_info())
-                if step%report_interval == 0:
-                    nsml.report(step = step, batch_loss = batch_loss.detach().item())
-                    print(f"[{step}/{len(train_dataloader)}] nsml.report batch_loss = {batch_loss.detach().item()}")
-
+                if step % report_interval == 0:
+                    nsml.report(step=step,
+                                batch_loss=batch_loss.detach().item())
+                    print(
+                        f"[{step}/{len(train_dataloader)}] nsml.report batch_loss = {batch_loss.detach().item()}"
+                    )
 
             training = False
             for step, batch in enumerate(valid_dataloader):
                 batch_loss, batch_acc = train_step(batch, training)
                 total_valid_loss += batch_loss
                 total_valid_acc += batch_acc
-
 
             print('=================loss=================')
             print(f'total_train_loss: {total_train_loss}')
@@ -266,26 +378,26 @@ if __name__ == '__main__':
             print('=================acc=================')
             print(f'total_train_acc : {total_train_acc}')
             print(f'total_valid_acc : {total_valid_acc}')
-            print(f'average_train_acc : {total_train_acc/len(train_dataloader)}')
-            print(f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
+            print(
+                f'average_train_acc : {total_train_acc/len(train_dataloader)}')
+            print(
+                f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
             print('\n')
 
-
             dict_for_infer = {
-                'model' : model.state_dict(),
-                'max_length' : max_length,
-                'target_size' : target_size,
-                'num_layers' : num_layers,
-                'd_model' : d_model,
-                'dff' : dff,
+                'model': model.state_dict(),
+                'max_length': max_length,
+                'target_size': target_size,
+                'num_layers': num_layers,
+                'd_model': d_model,
+                'dff': dff,
                 'num_heads': num_heads,
                 'dropout_rate': dropout_rate,
                 'epochs': epochs,
                 'learning_rate': learning_rate,
-                'tokenizer' : tokenizer,
-                'device' : device
+                'tokenizer': tokenizer,
+                'device': device
             }
 
-            
             # DONOTCHANGE (You can decide how often you want to save the model)
             nsml.save(epoch)
