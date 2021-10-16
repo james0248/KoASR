@@ -1,4 +1,4 @@
-#nsml: dacon/nia-pytorch:1.0
+# nsml: dacon/nia-pytorch:1.0
 from distutils.core import setup
 
 setup(
@@ -8,6 +8,7 @@ setup(
         'datasets==1.8.0',
         'transformers==4.4.0',
         'soundfile',
-        'jiwer'
+        'jiwer',
+        'hangul_utils'
     ]
 )
