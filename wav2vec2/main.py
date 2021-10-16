@@ -279,12 +279,10 @@ if __name__ == '__main__':
 
     logger.info(f"nsml report interval = {report_interval}")
 
-    device = torch.device("cuda:0")
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     model = Wav2Vec2ForCTC.from_pretrained(
         "fleek/wav2vec-large-xlsr-korean",
-        gradient_checkpointing=True,
-        ctc_loss_reduction='mean',
         attention_dropout=0.1,
         hidden_dropout=0.1,
         feat_proj_dropout=0.0,
@@ -293,8 +291,10 @@ if __name__ == '__main__':
         gradient_checkpointing=True,
         ctc_loss_reduction="mean",
         pad_token_id=processor.tokenizer.pad_token_id,
-        vocab_size=len(processor.tokenizer))
-
+        vocab_size=len(processor.tokenizer)
+        )
+    # TODO NameError: name 'processor' is not defined ㅠㅠ
+    
     bind_model(model=model, parser=args)
     if args.pause :
         nsml.paused(scope=locals())
