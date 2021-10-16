@@ -25,7 +25,7 @@ def remove_special_characters(batch):
 def prepare_dataset(file_list, df, val_size=0.01, isTest=False):
     if isTest == True:
         data = pd.DataFrame({'file_name': file_list})
-        df['path'] = data['path'].apply(
+        data['path'] = data['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'test', 'test_data', row))
         data['text'] = None
         test_data = Dataset.from_pandas(data)
