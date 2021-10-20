@@ -117,6 +117,7 @@ def map_to_array(batch, index):
         print(index)
     return batch
 
+
 def preprocess_dataset(batch, processor):
     # check that all files have the correct sampling rate
     assert (

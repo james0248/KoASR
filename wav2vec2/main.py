@@ -3,13 +3,12 @@ import os
 from glob import glob
 import gc
 import pickle
-
-from transformers.models.wav2vec2.tokenization_wav2vec2 import Wav2Vec2CTCTokenizer
 from gpuinfo import get_gpu_info
 import pprint
+import logging
 
-import numpy as np
 import pandas as pd
+import numpy as np
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
@@ -19,84 +18,75 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 import nsml
-from nsml import DATASET_PATH
+from nsml import HAS_DATASET, DATASET_PATH
 
+from transformers.models.wav2vec2.tokenization_wav2vec2 import Wav2Vec2CTCTokenizer
 from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2Processor
+from transformers import AdamW, get_scheduler
 from datasets import load_metric
 
 from data import prepare_dataset
 
-print('torch version: ', torch.__version__)
 
+print('torch version: ',torch.__version__)
 
-def map_to_result(batch):
-    model.to("cuda")
+def evaluate(model, batch):
+    '''
+    This function is called in submission
+    '''
+    model = model.to(device)
+    model.eval()
+    # Load processor from dictionary
     processor = dict_for_infer['processor']
-    input_values = processor(batch["data"],
-                             sampling_rate=batch["sampling_rate"],
-                             return_tensors="pt").input_values.to("cuda")
-
+    
+    # input_values = processor(
+    #   batch["speech"], 
+    #   sampling_rate=batch["sampling_rate"], 
+    #   return_tensors="pt"
+    # ).input_values.to(device)
+    input_values = batch["input_values"]
+    
     with torch.no_grad():
         logits = model(input_values).logits
-
+    
     pred_ids = torch.argmax(logits, dim=-1)
-    batch["text"] = processor.batch_decode(pred_ids)[0]
+    batch["pred_str"] = processor.batch_decode(pred_ids)
+    pred_str = batch["pred_str"]
+    return pred_str
 
-    return batch
-
-
-def evaluate(model, input):
-    model.to(device)
-    # as the target is english, the first word to the transformer should be the
-    # english start token.
-    processor = dict_for_infer['processor']
-    tokenizer = dict_for_infer['tokenizer']
-    decoder_input = torch.tensor([tokenizer.convert_tokens_to_ids['[SOS]']] *
-                                 input.size(0),
-                                 dtype=torch.long).to(device)
-    output = decoder_input.unsqueeze(1).to(device)
-
-    result_list = []
-    token_list = []
-
-    for tokens in output:
-        summary = tokenizer.convert(tokens)
-        result_list.append(summary)
-        token_list.append(tokens)
-
-    return result_list, token_list
 
 
 def train_step(batch_item, training):
-    src = batch_item['magnitude'].to(device)
-    tar = batch_item['target'].to(device)
-    tar_inp = tar[:, :-1]
-    tar_real = tar[:, 1:]
+    '''
+    Assuming batch_item has two columns
+    input_values, labels
+    '''
+    batch = {k: v.to(device) for k, v in batch_item.items()}
     if training is True:
-        # transformer.train()
         model.train()
-        optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            output, _, _ = model([src, tar_inp, None])
-            # output, _, _ = transformer([src, tar_inp, None])
-            loss = loss_function(tar_real, output)
-        acc = accuracy_function(tar_real, output)
+            outputs = model(**batch)
+            loss = outputs.loss
         loss.backward()
         optimizer.step()
-        lr = optimizer.param_groups[0]["lr"]
-        return loss, acc, round(lr, 10)
+        lr_scheduler.step()
+        optimizer.zero_grad()
+        return loss
+        
     else:
-        # transformer.eval()
         model.eval()
         with torch.no_grad():
-            output, _, _ = model([src, tar_inp, None])
-            # output, _, _ = transformer([src, tar_inp, None])
-            loss = loss_function(tar_real, output)
-        acc = accuracy_function(tar_real, output)
-
+            outputs = model(**batch)
+            loss = outputs.loss
+        logits = outputs.logits
+        pred_ids = torch.argmax(logits, dim=-1)
+        pred_str = processor.batch_decode(pred_ids)
+        # acc is metric btw pred_ids, batch["labels"]
+        # TODO define metric
+        acc = 0
         return loss, acc
 
-
+'''
 def loss_function(real, pred):
     mask = torch.logical_not(torch.eq(real, 0))
     loss_ = criterion(pred.permute(0, 2, 1), real)
@@ -114,28 +104,24 @@ def accuracy_function(real, pred):
     mask = torch.tensor(mask, dtype=torch.float32)
 
     return torch.sum(accuracies) / torch.sum(mask)
-
-
-def path_loader(root_path, is_test=False):
+'''
+def path_loader(root_path, is_test= False):
 
     if is_test:
-        test_path = os.path.join(root_path, 'test')
-        file_list = sorted(glob(os.path.join(test_path, 'test_data', '*')))
+        file_list = sorted(glob(os.path.join(root_path, 'test_data', '*')))
 
         return file_list
 
-    if args.mode == 'train':
+    if args.mode == 'train' :
         train_path = os.path.join(root_path, 'train')
         file_list = sorted(glob(os.path.join(train_path, 'train_data', '*')))
         label = pd.read_csv(os.path.join(train_path, 'train_label'))
 
-        return file_list, label
-
+    return file_list, label
 
 def save_checkpoint(checkpoint, dir):
 
     torch.save(checkpoint, os.path.join(dir))
-
 
 def bind_model(model, parser):
     # 학습한 모델을 저장하는 함수입니다.
@@ -144,7 +130,7 @@ def bind_model(model, parser):
         os.makedirs(dir_name, exist_ok=True)
         save_dir = os.path.join(dir_name, 'checkpoint')
         save_checkpoint(dict_for_infer, save_dir)
-
+        
         with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
             pickle.dump(dict_for_infer, f)
 
@@ -163,23 +149,24 @@ def bind_model(model, parser):
         global dict_for_infer
         with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
             dict_for_infer = pickle.load(f)
-
+        
         print("로딩 완료!")
 
     def infer(test_path, **kwparser):
         device = checkpoint['device']
         test_file_list = path_loader(test_path, is_test=True)
-        test_dataset = prepare_dataset(test_file_list, None, mode='test')
-        test_data_loader = DataLoader(test_dataset, batch_size=10)
-        result_list = []
 
+        processor = dict_for_infer["processor"]
+        test_data = prepare_dataset(test_file_list, None, is_test = True)
+        test_data_loader = DataLoader(test_data, batch_size=64, shuffle = False)
+
+        result_list = []
         for step, batch in enumerate(test_data_loader):
-            inp = batch['magnitude'].to(device)
-            output, _ = evaluate(model, inp)
+            output = evaluate(model, batch)
             result_list.extend(output)
 
         prob = [1] * len(result_list)
-
+        
         # DONOTCHANGE: They are reserved for nsml
         # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
         # return list(zip(pred.flatten(), clipped.flatten()))
@@ -284,21 +271,23 @@ if __name__ == '__main__':
     parser.add_argument('--pause', type=int, default=0)
     args = parser.parse_args()
 
-    pprint.pprint(get_gpu_info())
-
     report_interval = 10
     total_step = -1
-    print(f"nsml report interval = {report_interval}")
-
+    
     epochs = args.epochs
-    learning_rate = 5e-5  # 5e-5
-    batch_size = 128  # 32
-    device = torch.device("cuda:0")
+
+    learning_rate = 5e-5 # 5e-5
+    batch_size = 64
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    logger.info(f"nsml report interval = {report_interval}")
+
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     model = Wav2Vec2ForCTC.from_pretrained(
         "fleek/wav2vec-large-xlsr-korean",
-        gradient_checkpointing=True,
-        ctc_loss_reduction='mean',
         attention_dropout=0.1,
         hidden_dropout=0.1,
         feat_proj_dropout=0.0,
@@ -307,19 +296,20 @@ if __name__ == '__main__':
         gradient_checkpointing=True,
         ctc_loss_reduction="mean",
         pad_token_id=processor.tokenizer.pad_token_id,
-        vocab_size=len(processor.tokenizer))
-
+        vocab_size=len(processor.tokenizer)
+        )
+    # TODO NameError: name 'processor' is not defined ㅠㅠ
+    
     bind_model(model=model, parser=args)
-    if args.pause:
+    if args.pause :
         nsml.paused(scope=locals())
 
-    if args.mode == 'train':
+    if args.mode == 'train' :
         file_list, label = path_loader(DATASET_PATH)
 
-        train_dataset, val_dataset = prepare_dataset(file_list, label)
-
-        train_dataset.set_format('torch', columns=['data', 'target_text'])
-        val_dataset.set_format('torch', columns=['data', 'target_text'])
+        
+        train_data, val_data = prepare_dataset(file_list, label)
+        logger.info(train_data[0])
 
         tokenizer = Wav2Vec2CTCTokenizer('./vocab.json',
                                          unk_token="[UNK]",
@@ -339,21 +329,32 @@ if __name__ == '__main__':
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
 
+        train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle = True)
+        valid_dataloader = DataLoader(val_data, batch_size=batch_size, shuffle = True)
+        
+        
+        logger.warning(f"Number of batches : len(train) = {len(train_dataloader)}, len(valid) = {len(valid_dataloader)}")
+
+
         # load model from session checkpoint
         #nsml.load(checkpoint='0', session='nia1030/stt_1/5')
-        train_dataloader = DataLoader(train_dataset,
-                                      batch_size=batch_size,
-                                      shuffle=True)
 
-        valid_dataloader = DataLoader(val_dataset,
-                                      batch_size=batch_size,
-                                      shuffle=False)
+        
 
+        # Set optimizer, scheduler
+        optimizer = AdamW(model.parameters(), lr=learning_rate)
+        num_training_steps = args.epochs * len(train_dataloader)
+        lr_scheduler = get_scheduler(
+            "cosine",
+            optimizer=optimizer,
+            num_warmup_steps=0,
+            num_training_steps=num_training_steps
+        )
+
+        #criterion = nn.CrossEntropyLoss()
+
+        logger.warning("Training start")
         model = model.to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-        criterion = nn.CrossEntropyLoss()
-
-        print("Training start")
 
         for epoch in range(args.epochs):
             gc.collect()
@@ -362,19 +363,18 @@ if __name__ == '__main__':
 
             training = True
             for step, batch in enumerate(train_dataloader):
-                if (step == total_step): break
-
-                batch_loss, batch_acc, lr = train_step(batch, training)
+                if(step == total_step):  break
+                batch_loss = train_step(batch, training)
+                batch_loss = batch_loss.detach().item()
                 total_train_loss += batch_loss
-                total_train_acc += batch_acc
+                
                 if step == 0:
                     pprint.pprint(get_gpu_info())
-                if step % report_interval == 0:
-                    nsml.report(step=step,
-                                batch_loss=batch_loss.detach().item())
-                    print(
-                        f"[{step}/{len(train_dataloader)}] nsml.report batch_loss = {batch_loss.detach().item()}"
-                    )
+                if step%report_interval == 0:
+                    nsml.report(step = step, batch_loss = batch_loss)
+                    logger.info(f"[{step}/{len(train_dataloader)}] \
+                     batch_loss = {batch_loss}")
+
 
             training = False
             for step, batch in enumerate(valid_dataloader):
@@ -382,27 +382,31 @@ if __name__ == '__main__':
                 total_valid_loss += batch_loss
                 total_valid_acc += batch_acc
 
-            print('=================loss=================')
-            print(f'total_train_loss: {total_train_loss}')
-            print(f'total_valid_loss: {total_valid_loss}')
-            print('\n')
 
-            print('=================acc=================')
-            print(f'total_train_acc : {total_train_acc}')
-            print(f'total_valid_acc : {total_valid_acc}')
-            print(
-                f'average_train_acc : {total_train_acc/len(train_dataloader)}')
-            print(
-                f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
-            print('\n')
+            logger.warning('=================loss=================')
+            logger.warning(f'total_train_loss: {total_train_loss}')
+            logger.warning(f'total_valid_loss: {total_valid_loss}')
+            logger.warning('\n')
+
+            logger.warning('=================acc=================')
+            logger.warning(f'total_train_acc : {total_train_acc}')
+            logger.warning(f'total_valid_acc : {total_valid_acc}')
+            logger.warning(f'average_train_acc : {total_train_acc/len(train_dataloader)}')
+            logger.warning(f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
+            logger.warning('\n')
+
 
             dict_for_infer = {
-                'model': model.state_dict(),
+
+                'model' : model.state_dict(),
+                'processor' : processor,
                 'epochs': epochs,
                 'learning_rate': learning_rate,
-                'processor': processor,
-                'device': device
+                'tokenizer' : tokenizer,
+                'device' : device
+
             }
 
+            
             # DONOTCHANGE (You can decide how often you want to save the model)
             nsml.save(epoch)

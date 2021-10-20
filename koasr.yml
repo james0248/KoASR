@@ -1,0 +1,18 @@
+# For local debugging
+# conda env create -f koasr.yml
+name: koasr
+channels:
+    - conda-forge
+dependencies:
+    - python=3.8
+    - pytorch
+    - numpy
+    - pandas
+    - transformers
+    - datasets
+    - pysoundfile
+    - scikit-learn
+    - pip
+    - pip:
+        - hangul_utils
+        - git+https://github.com/n-CLAIR/nsml-local
