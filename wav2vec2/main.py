@@ -27,6 +27,7 @@ from datasets import load_metric
 
 from data import prepare_dataset
 
+
 print('torch version: ',torch.__version__)
 
 def evaluate(model, batch):
@@ -52,6 +53,7 @@ def evaluate(model, batch):
     batch["pred_str"] = processor.batch_decode(pred_ids)
     pred_str = batch["pred_str"]
     return pred_str
+
 
 
 def train_step(batch_item, training):
@@ -153,9 +155,11 @@ def bind_model(model, parser):
     def infer(test_path, **kwparser):
         device = checkpoint['device']
         test_file_list = path_loader(test_path, is_test=True)
+
         processor = dict_for_infer["processor"]
         test_data = prepare_dataset(test_file_list, None, is_test = True)
         test_data_loader = DataLoader(test_data, batch_size=64, shuffle = False)
+
         result_list = []
         for step, batch in enumerate(test_data_loader):
             output = evaluate(model, batch)
@@ -271,6 +275,7 @@ if __name__ == '__main__':
     total_step = -1
     
     epochs = args.epochs
+
     learning_rate = 5e-5 # 5e-5
     batch_size = 64
 
@@ -301,6 +306,7 @@ if __name__ == '__main__':
 
     if args.mode == 'train' :
         file_list, label = path_loader(DATASET_PATH)
+
         
         train_data, val_data = prepare_dataset(file_list, label)
         logger.info(train_data[0])
@@ -332,6 +338,7 @@ if __name__ == '__main__':
 
         # load model from session checkpoint
         #nsml.load(checkpoint='0', session='nia1030/stt_1/5')
+
         
 
         # Set optimizer, scheduler
@@ -390,12 +397,14 @@ if __name__ == '__main__':
 
 
             dict_for_infer = {
+
                 'model' : model.state_dict(),
                 'processor' : processor,
                 'epochs': epochs,
                 'learning_rate': learning_rate,
                 'tokenizer' : tokenizer,
                 'device' : device
+
             }
 
             

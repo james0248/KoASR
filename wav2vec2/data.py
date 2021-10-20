@@ -1,12 +1,97 @@
 import pandas as pd
 import re
 import json
-import soundfile as sf
-from hangul_utils import split_syllables
+import librosa
+from hangul_utils import join_jamos
 from sklearn.model_selection import train_test_split
-from datasets import Dataset
+from datasets import Dataset, load_from_disk
+
+from datasets.utils.logging import set_verbosity_error, set_verbosity_info
+
 from nsml import DATASET_PATH
 import os
+
+
+def init_data():
+    vocab = {
+        "[PAD]": 0,
+        "[UNK]": 3,
+        "|": 4,
+        "ㄱ": 5,
+        "ㄴ": 6,
+        "ㄷ": 7,
+        "ㄹ": 8,
+        "ㅁ": 9,
+        "ㅂ": 10,
+        "ㅅ": 11,
+        "ㅇ": 12,
+        "ㅈ": 13,
+        "ㅊ": 14,
+        "ㅋ": 15,
+        "ㅌ": 16,
+        "ㅍ": 17,
+        "ㅎ": 18,
+        "ㄲ": 19,
+        "ㄸ": 20,
+        "ㅃ": 21,
+        "ㅆ": 22,
+        "ㅉ": 23,
+        "ㅏ": 24,
+        "ㅐ": 25,
+        "ㅑ": 26,
+        "ㅒ": 27,
+        "ㅓ": 28,
+        "ㅔ": 29,
+        "ㅕ": 30,
+        "ㅖ": 31,
+        "ㅗ": 32,
+        "ㅘ": 33,
+        "ㅙ": 34,
+        "ㅚ": 35,
+        "ㅛ": 36,
+        "ㅜ": 37,
+        "ㅝ": 38,
+        "ㅞ": 39,
+        "ㅟ": 40,
+        "ㅠ": 41,
+        "ㅡ": 42,
+        "ㅢ": 43,
+        "ㅣ": 44,
+        "ㄳ": 45,
+        "ㄵ": 46,
+        "ㄶ": 47,
+        "ㄺ": 48,
+        "ㄻ": 49,
+        "ㄼ": 50,
+        "ㄽ": 51,
+        "ㄾ": 52,
+        "ㄿ": 53,
+        "ㅀ": 54,
+        "ㅄ": 55,
+    }
+    os.mkdir('./kowav-processor')
+    with open('./kowav-processor/vocab.json', 'w') as vocab_file:
+        json.dump(vocab, vocab_file)
+
+
+def remove_duplicate_tokens(token_list, processor):
+    prev_token = -1
+    clean_token_list = []
+    for token in token_list:
+        if token == processor.tokenizer.convert_tokens_to_ids('[PAD]'):
+            prev_token = -1
+        elif token != prev_token:
+            prev_token = token
+            clean_token_list.append(token)
+
+    return clean_token_list
+
+
+def decode_CTC(token_list, processor):
+    clean_token_list = remove_duplicate_tokens(token_list, processor)
+    raw_char_list = list(map(processor.convert, clean_token_list))
+    joined_string = join_jamos(''.join(raw_char_list))
+    return list(joined_string)
 
 
 def extract_all_chars(batch):
@@ -21,66 +106,114 @@ def remove_special_characters(batch):
                            batch["text"]).lower() + " "
     return batch
 
+def map_to_array(batch, index):
+    data, sampling_rate = librosa.load(batch['path'], sr=None)
+    resampled_data = librosa.resample(data, sampling_rate, 16_000, res_type='kaiser_fast')
+    batch['data'] = resampled_data
+    batch['sampling_rate'] = 16_000
+    batch['target_text'] = batch['text']
+    # del resampled_data, data
+    if(index<12800 and index%100==0):
+        print(index)
+    return batch
 
-def prepare_dataset(file_list, df, val_size=0.01, isTest=False):
-    if isTest == True:
-        data = pd.DataFrame({'file_name': file_list})
-        data['path'] = data['file_name'].apply(
-            lambda row: os.path.join(DATASET_PATH, 'test', 'test_data', row))
-        data['text'] = None
-        test_data = Dataset.from_pandas(data)
-        test_data.map(speech_file_to_array,
-                      remove_columns=test_data.column_names)
 
-        return test_data
+def preprocess_dataset(batch, processor):
+    # check that all files have the correct sampling rate
+    assert (
+        len(set(batch["sampling_rate"])) == 1
+    ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
 
-    else:
+    batch["input_values"] = processor(
+        batch["data"],
+        sampling_rate=batch["sampling_rate"][0]).input_values
+
+    with processor.as_target_processor():
+        batch["labels"] = processor(
+            batch["target_text"]).input_ids
+
+    return batch
+
+def prepare_dataset(file_list, df, processor, args, val_size=0.1):
+    if args.mode == 'train':
+        set_verbosity_error()   #disable logging
+
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
-        df['text'] = df['text'].apply(split_syllables)
+        # df['text_split'] = df['text'].apply(split_syllables)
+        df = df.loc[:30000, :]
+        print(f"Number of soundfiles : {len(df)}")
+        # print(df.head())
+        
         train, val = train_test_split(df, test_size=val_size)
 
-        train_data = Dataset.from_pandas(train)
-        val_data = Dataset.from_pandas(val)
+        train_data = Dataset.from_pandas(train) # THESE HAD TO BE USED VERY CAREFULLY.
+        val_data = Dataset.from_pandas(val) #  IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
 
-        train_data = train_data.map(remove_special_characters)
-        val_data = val_data.map(remove_special_characters)
-        # generate vocab.json
-        vocab_train = train_data.map(extract_all_chars,
-                                     batched=True,
-                                     batch_size=-1,
-                                     keep_in_memory=True,
-                                     remove_columns=train_data.column_names)
-        vocab_val = val_data.map(extract_all_chars,
-                                 batched=True,
-                                 batch_size=-1,
-                                 keep_in_memory=True,
-                                 remove_columns=val_data.column_names)
+        train_data = train_data.map(
+            remove_special_characters,
+            num_proc=args.preprocessing_num_workers,
+        )
+        val_data = val_data.map(
+            remove_special_characters,
+            num_proc=args.preprocessing_num_workers,
+        )
 
-        vocab_list = list(
-            set(vocab_train["vocab"][0]) | set(vocab_val["vocab"][0]))
-        vocab_dict = {v: k for k, v in enumerate(vocab_list)}
+        # first save this files to disk and reload
+        train_data.save_to_disk('./train_temp')
+        val_data.save_to_disk('./val_temp')
 
-        vocab_dict["|"] = vocab_dict[" "]
-        del vocab_dict[" "]
-        vocab_dict["[UNK]"] = len(vocab_dict)
-        vocab_dict["[PAD]"] = len(vocab_dict)
-        print(vocab_dict)
-        with open('vocab.json', 'w') as vocab_file:
-            json.dump(vocab_dict, vocab_file)
+        train_data = load_from_disk('./train_temp')
+        val_data = load_from_disk('./val_temp')
 
         # change data to array
-        train_data = train_data.map(speech_file_to_array,
-                                    remove_columns=train_data.column_names)
-        val_data = val_data.map(speech_file_to_array,
-                                remove_columns=val_data.column_names)
+        print("Start changing to array")
+
+        train_data = train_data.map(
+            map_to_array,
+            remove_columns=train_data.column_names,
+            num_proc=args.preprocessing_num_workers,
+            with_indices= True
+        )
+        val_data = val_data.map(
+            map_to_array,
+            remove_columns=val_data.column_names,
+            num_proc=args.preprocessing_num_workers,
+            with_indices= True
+        )
+
+        print("Start preprocess")
+        
+        train_data = train_data.map(
+            preprocess_dataset,
+            batched=True,
+            num_proc=args.preprocessing_num_workers,
+            fn_kwargs={'processor' : processor},
+        )
+        val_data = val_data.map(
+            preprocess_dataset,
+            batched=True,
+            num_proc=args.preprocessing_num_workers,
+            fn_kwargs={'processor' : processor}
+        )
+        
+        set_verbosity_info()
 
         return train_data, val_data
 
+    else:
+        data = pd.DataFrame({'file_name': file_list})
+        data['path'] = data['path'].apply(
+            lambda row: os.path.join(DATASET_PATH, 'test', 'test_data', row))
+        data['target_text'] = None
+        test_data = Dataset.from_pandas(data)
+        print("Start changing to array")
+        test_data.map(
+            map_to_array,
+            remove_columns=test_data.column_names,
+        )
+        print("Finished changing to array")
 
-def speech_file_to_array(batch):
-    data, sampling_rate = sf.read(batch['path'])
-    batch['data'] = data
-    batch['sampling_rate'] = sampling_rate
-    batch['target_text'] = batch['text']
-    return batch
+        return test_data
+
+
