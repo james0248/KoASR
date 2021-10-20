@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from gc import callbacks
+import gc
 import logging
 import re
 from glob import glob
@@ -88,6 +89,12 @@ class DataTrainingArguments:
         default="train",
         metadata={
             "help": "Set mode for training or testing. Defaults to 'train'"
+        },
+    )
+    split: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Which split to use",
         },
     )
     target_text_column: Optional[str] = field(
@@ -213,7 +220,7 @@ class NSMLCallback(TrainerCallback):
             'processor': processor,
             'device': device,
         }
-        nsml.save(state.epoch)
+        nsml.save(int(state.epoch))
         print(state.epoch)
         print(state.best_metric)
 
@@ -420,6 +427,7 @@ if __name__ == "__main__":
                 batch["labels"] = processor(
                     batch[data_args.target_text_column]).input_ids
             # print("HELLO5")
+            gc.collect()
             return batch
 
         train_dataset = train_dataset.map(
@@ -428,12 +436,14 @@ if __name__ == "__main__":
             batched=True,
             num_proc=data_args.preprocessing_num_workers,
         )
+        gc.collect()
         val_dataset = val_dataset.map(
             preprocess_dataset,
             batch_size=training_args.per_device_train_batch_size,
             batched=True,
             num_proc=data_args.preprocessing_num_workers,
         )
+        gc.collect()
 
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
@@ -471,4 +481,3 @@ if __name__ == "__main__":
         print("Training start")
         trainer.train()
         processor.save_pretrained('./kowav-processor')
-        nsml.save()

@@ -1,3 +1,4 @@
+import gc
 import pandas as pd
 import re
 import json
@@ -108,8 +109,12 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
     if args.mode == 'train':
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
+        if args.split != None:
+            batch_size = len(df) / 2
+            df = df.loc[batch_size * args.split:batch_size *
+                        (args.split + 1), :]
+
         # df['text_split'] = df['text'].apply(split_syllables)
-        df = df.loc[:1000, :]
         df.head()
         train, val = train_test_split(df, test_size=val_size)
 
@@ -149,17 +154,22 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         #     json.dump(vocab_dict, vocab_file)
 
         # change data to array
-        print("Start changing to array")
+        print("Start changing to array (train)")
         train_data = train_data.map(
             map_to_array,
             remove_columns=train_data.column_names,
             num_proc=args.preprocessing_num_workers,
+            with_indices=True,
         )
+
+        print("Start changing to array (validation)")
         val_data = val_data.map(
             map_to_array,
             remove_columns=val_data.column_names,
             num_proc=args.preprocessing_num_workers,
+            with_indices=True,
         )
+        gc.collect()
 
         print("Finished changing to array")
 
@@ -181,12 +191,14 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         return test_data
 
 
-def map_to_array(batch):
+def map_to_array(batch, index):
     data, sampling_rate = librosa.load(batch['path'])
     resampled_data = librosa.resample(data, sampling_rate, 16_000)
     batch['data'] = resampled_data
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
+    if index % 5000 == 0:
+        gc.collect()
     return batch
 
 
