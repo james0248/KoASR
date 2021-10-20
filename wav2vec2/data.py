@@ -1,11 +1,10 @@
-import gc
 import pandas as pd
 import re
 import json
 import librosa
 from hangul_utils import join_jamos
 from sklearn.model_selection import train_test_split
-from datasets import Dataset
+from datasets import Dataset, load_from_disk
 from nsml import DATASET_PATH
 import os
 
@@ -109,12 +108,8 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
     if args.mode == 'train':
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
-        if args.split != None:
-            batch_size = len(df) / 2
-            df = df.loc[batch_size * args.split:batch_size *
-                        (args.split + 1), :]
-
         # df['text_split'] = df['text'].apply(split_syllables)
+        df = df.loc[:1000, :]
         df.head()
         train, val = train_test_split(df, test_size=val_size)
 
@@ -154,26 +149,30 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         #     json.dump(vocab_dict, vocab_file)
 
         # change data to array
-        print("Start changing to array (train)")
+        print("Start changing to array")
         train_data = train_data.map(
             map_to_array,
             remove_columns=train_data.column_names,
             num_proc=args.preprocessing_num_workers,
-            with_indices=True,
         )
-
-        print("Start changing to array (validation)")
         val_data = val_data.map(
             map_to_array,
             remove_columns=val_data.column_names,
             num_proc=args.preprocessing_num_workers,
-            with_indices=True,
         )
-        gc.collect()
 
         print("Finished changing to array")
+        
 
-        return train_data, val_data
+        print("Saving to Disk")
+        train_data_path = "./train_data"
+        val_data_path = "./val_data"
+        
+        train_data.save_to_disk(train_data_path)
+        val_data.save_to_disk(val_data_path)
+        print("Saved to Disk")
+        
+        return train_data_path, val_data_path
 
     else:
         data = pd.DataFrame({'file_name': file_list})
@@ -191,14 +190,12 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         return test_data
 
 
-def map_to_array(batch, index):
+def map_to_array(batch):
     data, sampling_rate = librosa.load(batch['path'])
     resampled_data = librosa.resample(data, sampling_rate, 16_000)
     batch['data'] = resampled_data
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
-    if index % 5000 == 0:
-        gc.collect()
     return batch
 
 
