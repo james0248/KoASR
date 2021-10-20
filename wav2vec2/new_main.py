@@ -8,6 +8,7 @@ import pickle
 import sys
 import os
 from dataclasses import dataclass, field
+from datasets.search import NearestExamplesResults
 
 from hangul_utils import join_jamos
 from gpuinfo import get_gpu_info
@@ -29,6 +30,9 @@ from transformers import (HfArgumentParser, Trainer, TrainingArguments,
 
 from data import init_data, remove_duplicate_tokens, prepare_dataset
 from nsml import DATASET_PATH
+
+import warnings
+warnings.filterwarnings(action='ignore')
 
 if is_apex_available():
     from apex import amp
@@ -226,6 +230,10 @@ class NSMLCallback(TrainerCallback):
 
 
 class CTCTrainer(Trainer):
+    def __init__(self, **kwargs):
+        super(CTCTrainer, self).__init__(**kwargs)
+        self.cur_step = 0
+
     def training_step(
             self, model: nn.Module,
             inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
@@ -247,6 +255,10 @@ class CTCTrainer(Trainer):
             :obj:`torch.Tensor`: The tensor with training loss on this batch.
         """
 
+        self.cur_step += 1
+        print(self.cur_step)
+        gc.collect()
+        print(get_gpu_info())
         model.train()
         inputs = self._prepare_inputs(inputs)
 
@@ -403,46 +415,42 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         print("Dataset preparation begin!")
-        train_data_path, val_data_path = prepare_dataset(file_list,
+        train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
                                                      args=data_args)
-        train_dataset = datasets.load_from_disk(train_data_path)
-        val_dataset = datasets.load_from_disk(val_data_path)
+        # train_dataset = datasets.load_from_disk(train_data_path)
+        # val_dataset = datasets.load_from_disk(val_data_path)
 
         print("Finished dataset preparation")
 
         wer_metric = datasets.load_metric("wer")
 
         def preprocess_dataset(batch):
-            # print("HELLO1")
-            # print("HELLO2")
             # check that all files have the correct sampling rate
             assert (
                 len(set(batch["sampling_rate"])) == 1
             ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
-            # print("HELLO3")
 
             batch["input_values"] = processor(
                 batch["data"],
                 sampling_rate=batch["sampling_rate"][0]).input_values
-            # print("HELLO4")
+
             with processor.as_target_processor():
                 batch["labels"] = processor(
                     batch[data_args.target_text_column]).input_ids
-            # print("HELLO5")
-            gc.collect()
+
             return batch
 
         train_dataset = train_dataset.map(
             preprocess_dataset,
-            batch_size=training_args.per_device_train_batch_size,
+            #batch_size=training_args.per_device_train_batch_size, # this is gpu batch, i guess
             batched=True,
             num_proc=data_args.preprocessing_num_workers,
         )
         gc.collect()
         val_dataset = val_dataset.map(
             preprocess_dataset,
-            batch_size=training_args.per_device_train_batch_size,
+            #batch_size=training_args.per_device_train_batch_size,
             batched=True,
             num_proc=data_args.preprocessing_num_workers,
         )

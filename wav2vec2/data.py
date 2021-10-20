@@ -5,6 +5,10 @@ import librosa
 from hangul_utils import join_jamos
 from sklearn.model_selection import train_test_split
 from datasets import Dataset, load_from_disk
+
+from datasets.utils.logging import set_verbosity_error, set_verbosity_info
+set_verbosity_error()   #disable logging
+
 from nsml import DATASET_PATH
 import os
 
@@ -109,12 +113,14 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
         # df['text_split'] = df['text'].apply(split_syllables)
-        df = df.loc[:1000, :]
-        df.head()
+        # df = df.loc[:1000, :]
+        print(len(df))
+        print(df.head())
+        
         train, val = train_test_split(df, test_size=val_size)
 
-        train_data = Dataset.from_pandas(train)
-        val_data = Dataset.from_pandas(val)
+        train_data = Dataset.from_pandas(train) # THESE HAD TO BE USED VERY CAREFULLY.
+        val_data = Dataset.from_pandas(val) #  IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
 
         train_data = train_data.map(
             remove_special_characters,
@@ -124,55 +130,51 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
             remove_special_characters,
             num_proc=args.preprocessing_num_workers,
         )
-        # generate vocab.json
-        # vocab_train = train_data.map(extract_all_chars,
-        #                              batched=True,
-        #                              batch_size=-1,
-        #                              keep_in_memory=True,
-        #                              remove_columns=train_data.column_names)
-        # vocab_val = val_data.map(extract_all_chars,
-        #                          batched=True,
-        #                          batch_size=-1,
-        #                          keep_in_memory=True,
-        #                          remove_columns=val_data.column_names)
 
-        # vocab_list = list(
-        #     set(vocab_train["vocab"][0]) | set(vocab_val["vocab"][0]))
-        # vocab_dict = {v: k for k, v in enumerate(vocab_list)}
+        # first save this files to disk and reload
+        train_data.save_to_disk('./train_temp')
+        val_data.save_to_disk('./val_temp')
 
-        # vocab_dict["|"] = vocab_dict[" "]
-        # del vocab_dict[" "]
-        # vocab_dict["[UNK]"] = len(vocab_dict)
-        # vocab_dict["[PAD]"] = len(vocab_dict)
-        # print(vocab_dict)
-        # with open('vocab.json', 'w') as vocab_file:
-        #     json.dump(vocab_dict, vocab_file)
+        train_data = load_from_disk('./train_temp')
+        val_data = load_from_disk('./val_temp')
 
         # change data to array
         print("Start changing to array")
+        global count
+        count = 0
+
         train_data = train_data.map(
             map_to_array,
             remove_columns=train_data.column_names,
             num_proc=args.preprocessing_num_workers,
+            with_indices= True
         )
         val_data = val_data.map(
             map_to_array,
             remove_columns=val_data.column_names,
             num_proc=args.preprocessing_num_workers,
+            with_indices= True
         )
 
         print("Finished changing to array")
         
 
-        print("Saving to Disk")
-        train_data_path = "./train_data"
-        val_data_path = "./val_data"
+
+        # print("Start Saving to Disk")
+        # train_data_path = "./train_data"
+        # val_data_path = "./val_data"
         
-        train_data.save_to_disk(train_data_path)
-        val_data.save_to_disk(val_data_path)
-        print("Saved to Disk")
+        # train_data.save_to_disk(train_data_path)
+        # val_data.save_to_disk(val_data_path)
+
+        # del train_data
+        # del val_data
+
+        # print("Saved to Disk")
         
-        return train_data_path, val_data_path
+        #set_verbosity_info()
+
+        return train_data, val_data
 
     else:
         data = pd.DataFrame({'file_name': file_list})
@@ -190,12 +192,15 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         return test_data
 
 
-def map_to_array(batch):
-    data, sampling_rate = librosa.load(batch['path'])
-    resampled_data = librosa.resample(data, sampling_rate, 16_000)
+def map_to_array(batch, index):
+    data, sampling_rate = librosa.load(batch['path'], sr=None)
+    resampled_data = librosa.resample(data, sampling_rate, 16_000, res_type='kaiser_fast')
     batch['data'] = resampled_data
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
+    del resampled_data, data
+    if(index<113347//8 and index%100==0):
+        print(index)
     return batch
 
 
