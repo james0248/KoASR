@@ -225,7 +225,7 @@ class NSMLCallback(TrainerCallback):
             'device': device,
         }
         nsml.save(int(state.epoch))
-        print(state.epoch)
+        #print(state.epoch)
         print(state.best_metric)
 
 
@@ -233,6 +233,7 @@ class CTCTrainer(Trainer):
     def __init__(self, **kwargs):
         super(CTCTrainer, self).__init__(**kwargs)
         self.cur_step = 0
+        self.report_interval = 10
 
     def training_step(
             self, model: nn.Module,
@@ -258,7 +259,7 @@ class CTCTrainer(Trainer):
         self.cur_step += 1
         print(self.cur_step)
         gc.collect()
-        print(get_gpu_info())
+        # print(get_gpu_info())
         model.train()
         inputs = self._prepare_inputs(inputs)
 
@@ -291,6 +292,8 @@ class CTCTrainer(Trainer):
         else:
             loss.backward()
 
+        if self.cur_step % self.report_interval==0:
+            nsml.report(step = self.cur_step, batch_loss = loss.detach().item())
         return loss.detach()
 
 
@@ -400,8 +403,6 @@ if __name__ == "__main__":
     processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                   tokenizer=tokenizer)
 
-    # orthography = Orthography.from_name(data_args.orthography.lower())
-    # processor = orthography.create_processor(model_args)
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -417,44 +418,11 @@ if __name__ == "__main__":
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
+                                                     processor,
                                                      args=data_args)
-        # train_dataset = datasets.load_from_disk(train_data_path)
-        # val_dataset = datasets.load_from_disk(val_data_path)
-
         print("Finished dataset preparation")
 
         wer_metric = datasets.load_metric("wer")
-
-        def preprocess_dataset(batch):
-            # check that all files have the correct sampling rate
-            assert (
-                len(set(batch["sampling_rate"])) == 1
-            ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
-
-            batch["input_values"] = processor(
-                batch["data"],
-                sampling_rate=batch["sampling_rate"][0]).input_values
-
-            with processor.as_target_processor():
-                batch["labels"] = processor(
-                    batch[data_args.target_text_column]).input_ids
-
-            return batch
-
-        train_dataset = train_dataset.map(
-            preprocess_dataset,
-            #batch_size=training_args.per_device_train_batch_size, # this is gpu batch, i guess
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-        )
-        gc.collect()
-        val_dataset = val_dataset.map(
-            preprocess_dataset,
-            #batch_size=training_args.per_device_train_batch_size,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-        )
-        gc.collect()
 
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
@@ -491,4 +459,4 @@ if __name__ == "__main__":
 
         print("Training start")
         trainer.train()
-        processor.save_pretrained('./kowav-processor')
+        #processor.save_pretrained('./kowav-processor')

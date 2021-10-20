@@ -7,7 +7,6 @@ from sklearn.model_selection import train_test_split
 from datasets import Dataset, load_from_disk
 
 from datasets.utils.logging import set_verbosity_error, set_verbosity_info
-set_verbosity_error()   #disable logging
 
 from nsml import DATASET_PATH
 import os
@@ -107,15 +106,43 @@ def remove_special_characters(batch):
                            batch["text"]).lower() + " "
     return batch
 
+def map_to_array(batch, index):
+    data, sampling_rate = librosa.load(batch['path'], sr=None)
+    resampled_data = librosa.resample(data, sampling_rate, 16_000, res_type='kaiser_fast')
+    batch['data'] = resampled_data
+    batch['sampling_rate'] = 16_000
+    batch['target_text'] = batch['text']
+    # del resampled_data, data
+    if(index<12800 and index%100==0):
+        print(index)
+    return batch
 
-def prepare_dataset(file_list, df, args, val_size=0.1):
+def preprocess_dataset(batch, processor):
+    # check that all files have the correct sampling rate
+    assert (
+        len(set(batch["sampling_rate"])) == 1
+    ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
+
+    batch["input_values"] = processor(
+        batch["data"],
+        sampling_rate=batch["sampling_rate"][0]).input_values
+
+    with processor.as_target_processor():
+        batch["labels"] = processor(
+            batch["target_text"]).input_ids
+
+    return batch
+
+def prepare_dataset(file_list, df, processor, args, val_size=0.1):
     if args.mode == 'train':
+        set_verbosity_error()   #disable logging
+
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
         # df['text_split'] = df['text'].apply(split_syllables)
-        # df = df.loc[:1000, :]
-        print(len(df))
-        print(df.head())
+        df = df.loc[:30000, :]
+        print(f"Number of soundfiles : {len(df)}")
+        # print(df.head())
         
         train, val = train_test_split(df, test_size=val_size)
 
@@ -140,8 +167,6 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
 
         # change data to array
         print("Start changing to array")
-        global count
-        count = 0
 
         train_data = train_data.map(
             map_to_array,
@@ -156,23 +181,22 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
             with_indices= True
         )
 
-        print("Finished changing to array")
+        print("Start preprocess")
         
-
-
-        # print("Start Saving to Disk")
-        # train_data_path = "./train_data"
-        # val_data_path = "./val_data"
+        train_data = train_data.map(
+            preprocess_dataset,
+            batched=True,
+            num_proc=args.preprocessing_num_workers,
+            fn_kwargs={'processor' : processor},
+        )
+        val_data = val_data.map(
+            preprocess_dataset,
+            batched=True,
+            num_proc=args.preprocessing_num_workers,
+            fn_kwargs={'processor' : processor}
+        )
         
-        # train_data.save_to_disk(train_data_path)
-        # val_data.save_to_disk(val_data_path)
-
-        # del train_data
-        # del val_data
-
-        # print("Saved to Disk")
-        
-        #set_verbosity_info()
+        set_verbosity_info()
 
         return train_data, val_data
 
@@ -192,44 +216,3 @@ def prepare_dataset(file_list, df, args, val_size=0.1):
         return test_data
 
 
-def map_to_array(batch, index):
-    data, sampling_rate = librosa.load(batch['path'], sr=None)
-    resampled_data = librosa.resample(data, sampling_rate, 16_000, res_type='kaiser_fast')
-    batch['data'] = resampled_data
-    batch['sampling_rate'] = 16_000
-    batch['target_text'] = batch['text']
-    del resampled_data, data
-    if(index<113347//8 and index%100==0):
-        print(index)
-    return batch
-
-
-# class KoWavDataset(Dataset):
-#     def __init__(self, file_list, target_list, mode='train'):
-#         self.mode = mode
-
-#         if self.mode == 'train':
-#             self.path_list = np.array([
-#                 os.path.join(DATASET_PATH, 'train', 'train_data', files)
-#                 for files in file_list
-#             ])
-#             self.text_list = target_list
-#         else:
-#             self.path_list = np.array([
-#                 os.path.join(DATASET_PATH, 'test', 'test_data', files)
-#                 for files in file_list
-#             ])
-
-#     def __len__(self):
-#         return len(self.path_list)
-
-#     def __getitem__(self, i):
-#         data, sampling_rate = sf.read(self.path_list[i])
-#         if self.mode == 'train':
-#             text = self.text_list[i]
-#             return {
-#                 'data': torch.tensor(data, dtype=torch.float32),
-#                 'text': torch.tensor(text, dtype=torch.long)
-#             }
-#         else:
-#             return {'data': torch.tensor(data, dtype=torch.float32)}
