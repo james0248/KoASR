@@ -403,10 +403,13 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         print("Dataset preparation begin!")
-        train_dataset, val_dataset = prepare_dataset(file_list,
+        train_data_path, val_data_path = prepare_dataset(file_list,
                                                      label,
                                                      args=data_args)
-        print("Finsihed dataset preparation")
+        train_dataset = datasets.load_from_disk(train_data_path)
+        val_dataset = datasets.load_from_disk(val_data_path)
+
+        print("Finished dataset preparation")
 
         wer_metric = datasets.load_metric("wer")
 
