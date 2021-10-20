@@ -29,29 +29,32 @@ from data import prepare_dataset
 print('torch version: ', torch.__version__)
 
 
-def evaluate(model, imgs):
+def map_to_result(batch):
+    model.to("cuda")
+    processor = dict_for_infer['processor']
+    input_values = processor(batch["data"],
+                             sampling_rate=batch["sampling_rate"],
+                             return_tensors="pt").input_values.to("cuda")
+
+    with torch.no_grad():
+        logits = model(input_values).logits
+
+    pred_ids = torch.argmax(logits, dim=-1)
+    batch["text"] = processor.batch_decode(pred_ids)[0]
+
+    return batch
+
+
+def evaluate(model, input):
     model.to(device)
     # as the target is english, the first word to the transformer should be the
     # english start token.
+    processor = dict_for_infer['processor']
     tokenizer = dict_for_infer['tokenizer']
-    decoder_input = torch.tensor([tokenizer.txt2idx['<sos>']] * imgs.size(0),
+    decoder_input = torch.tensor([tokenizer.convert_tokens_to_ids['[SOS]']] *
+                                 input.size(0),
                                  dtype=torch.long).to(device)
     output = decoder_input.unsqueeze(1).to(device)
-    enc_output = None
-    for i in range(max_length + 1):
-        # predictions.shape == (batch_size, seq_len, vocab_size)
-        with torch.no_grad():
-            # predictions, attention_weights, enc_output = transformer([imgs, output, enc_output])
-            predictions, attention_weights, enc_output = model(
-                [imgs, output, enc_output])
-        # select the last token from the seq_len dimension
-        predictions_ = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
-
-        predicted_id = torch.tensor(torch.argmax(predictions_, axis=-1),
-                                    dtype=torch.int32)
-
-        output = torch.cat([output, predicted_id], dim=-1)
-    output = output.cpu().numpy()
 
     result_list = []
     token_list = []
@@ -166,7 +169,7 @@ def bind_model(model, parser):
     def infer(test_path, **kwparser):
         device = checkpoint['device']
         test_file_list = path_loader(test_path, is_test=True)
-        test_dataset = CustomDataset(test_file_list, None, 160000, 'test')
+        test_dataset = prepare_dataset(test_file_list, None, mode='test')
         test_data_loader = DataLoader(test_dataset, batch_size=10)
         result_list = []
 
@@ -289,6 +292,7 @@ if __name__ == '__main__':
 
     epochs = args.epochs
     learning_rate = 5e-5  # 5e-5
+    batch_size = 128  # 32
     device = torch.device("cuda:0")
 
     model = Wav2Vec2ForCTC.from_pretrained(
@@ -312,7 +316,10 @@ if __name__ == '__main__':
     if args.mode == 'train':
         file_list, label = path_loader(DATASET_PATH)
 
-        train_data, val_data = prepare_dataset(file_list, label)
+        train_dataset, val_dataset = prepare_dataset(file_list, label)
+
+        train_dataset.set_format('torch', columns=['data', 'target_text'])
+        val_dataset.set_format('torch', columns=['data', 'target_text'])
 
         tokenizer = Wav2Vec2CTCTokenizer('./vocab.json',
                                          unk_token="[UNK]",
@@ -329,13 +336,18 @@ if __name__ == '__main__':
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                       tokenizer=tokenizer)
 
-        print(train_data[0])
-
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
 
         # load model from session checkpoint
         #nsml.load(checkpoint='0', session='nia1030/stt_1/5')
+        train_dataloader = DataLoader(train_dataset,
+                                      batch_size=batch_size,
+                                      shuffle=True)
+
+        valid_dataloader = DataLoader(val_dataset,
+                                      batch_size=batch_size,
+                                      shuffle=False)
 
         model = model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -386,16 +398,9 @@ if __name__ == '__main__':
 
             dict_for_infer = {
                 'model': model.state_dict(),
-                'max_length': max_length,
-                'target_size': target_size,
-                'num_layers': num_layers,
-                'd_model': d_model,
-                'dff': dff,
-                'num_heads': num_heads,
-                'dropout_rate': dropout_rate,
                 'epochs': epochs,
                 'learning_rate': learning_rate,
-                'tokenizer': tokenizer,
+                'processor': processor,
                 'device': device
             }
 
