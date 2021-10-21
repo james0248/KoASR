@@ -67,7 +67,7 @@ class ModelArguments:
             "help":
             "Whether to freeze the feature extractor layers of the model."
         })
-    gradient_checkpointing: Optional[bool] = field(
+    gradient_checkpointing_2: Optional[bool] = field(
         default=False,
         metadata={
             "help":
@@ -266,6 +266,7 @@ class CTCTrainer(Trainer):
         self.cur_step += 1
         # print(self.cur_step)
         gc.collect()
+        torch.cuda.empty_cache()
         # print(get_gpu_info())
         model.train()
         inputs = self._prepare_inputs(inputs)
@@ -414,7 +415,7 @@ if __name__ == "__main__":
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
-        gradient_checkpointing=model_args.gradient_checkpointing,
+        gradient_checkpointing=model_args.gradient_checkpointing_2,
         vocab_size=len(processor.tokenizer),
     )
 

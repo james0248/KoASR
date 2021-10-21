@@ -69,7 +69,7 @@ def init_data():
         "ㅀ": 54,
         "ㅄ": 55,
     }
-    os.mkdir('./kowav-processor')
+    os.makedirs('./kowav-processor',exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
         json.dump(vocab, vocab_file)
 
@@ -117,7 +117,7 @@ def map_to_array(batch, index):
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
     # del resampled_data, data
-    if (index < 12800 and index % 100 == 0):
+    if (index < 12800//5 and index % 100 == 0):
         print(index)
     return batch
 
@@ -130,7 +130,9 @@ def preprocess_dataset(batch, processor):
 
     batch["input_values"] = processor(
         batch["data"], sampling_rate=batch["sampling_rate"][0]).input_values
-
+    
+    batch["length"] = [len(x) for x in batch["input_values"]]
+    
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
 
