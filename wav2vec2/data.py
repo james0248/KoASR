@@ -106,14 +106,18 @@ def remove_special_characters(batch):
                            batch["text"]).lower() + " "
     return batch
 
+
 def map_to_array(batch, index):
     data, sampling_rate = librosa.load(batch['path'], sr=None)
-    resampled_data = librosa.resample(data, sampling_rate, 16_000, res_type='kaiser_fast')
+    resampled_data = librosa.resample(data,
+                                      sampling_rate,
+                                      16_000,
+                                      res_type='kaiser_fast')
     batch['data'] = resampled_data
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
     # del resampled_data, data
-    if(index<12800 and index%100==0):
+    if (index < 12800 and index % 100 == 0):
         print(index)
     return batch
 
@@ -125,30 +129,35 @@ def preprocess_dataset(batch, processor):
     ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
 
     batch["input_values"] = processor(
-        batch["data"],
-        sampling_rate=batch["sampling_rate"][0]).input_values
+        batch["data"], sampling_rate=batch["sampling_rate"][0]).input_values
 
     with processor.as_target_processor():
-        batch["labels"] = processor(
-            batch["target_text"]).input_ids
+        batch["labels"] = processor(batch["target_text"]).input_ids
 
     return batch
 
+
 def prepare_dataset(file_list, df, processor, args, val_size=0.1):
     if args.mode == 'train':
-        set_verbosity_error()   #disable logging
+        set_verbosity_error()  #disable logging
 
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
+        if args.split != None and args.max_split != None:
+            length = int(len(df) / args.max_split)
+            i = args.split
+            df = df.iloc[i * length:(i + 1) * length, :]
         # df['text_split'] = df['text'].apply(split_syllables)
-        df = df.loc[:30000, :]
+        # df = df.loc[:30000, :]
         print(f"Number of soundfiles : {len(df)}")
         # print(df.head())
-        
+
         train, val = train_test_split(df, test_size=val_size)
 
-        train_data = Dataset.from_pandas(train) # THESE HAD TO BE USED VERY CAREFULLY.
-        val_data = Dataset.from_pandas(val) #  IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
+        train_data = Dataset.from_pandas(
+            train)  # THESE HAD TO BE USED VERY CAREFULLY.
+        val_data = Dataset.from_pandas(
+            val)  #  IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
 
         train_data = train_data.map(
             remove_special_characters,
@@ -169,34 +178,28 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
         # change data to array
         print("Start changing to array")
 
-        train_data = train_data.map(
-            map_to_array,
-            remove_columns=train_data.column_names,
-            num_proc=args.preprocessing_num_workers,
-            with_indices= True
-        )
-        val_data = val_data.map(
-            map_to_array,
-            remove_columns=val_data.column_names,
-            num_proc=args.preprocessing_num_workers,
-            with_indices= True
-        )
+        train_data = train_data.map(map_to_array,
+                                    remove_columns=train_data.column_names,
+                                    num_proc=args.preprocessing_num_workers,
+                                    with_indices=True)
+        val_data = val_data.map(map_to_array,
+                                remove_columns=val_data.column_names,
+                                num_proc=args.preprocessing_num_workers,
+                                with_indices=True)
 
         print("Start preprocess")
-        
+
         train_data = train_data.map(
             preprocess_dataset,
             batched=True,
             num_proc=args.preprocessing_num_workers,
-            fn_kwargs={'processor' : processor},
+            fn_kwargs={'processor': processor},
         )
-        val_data = val_data.map(
-            preprocess_dataset,
-            batched=True,
-            num_proc=args.preprocessing_num_workers,
-            fn_kwargs={'processor' : processor}
-        )
-        
+        val_data = val_data.map(preprocess_dataset,
+                                batched=True,
+                                num_proc=args.preprocessing_num_workers,
+                                fn_kwargs={'processor': processor})
+
         set_verbosity_info()
 
         return train_data, val_data
@@ -215,5 +218,3 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
         print("Finished changing to array")
 
         return test_data
-
-

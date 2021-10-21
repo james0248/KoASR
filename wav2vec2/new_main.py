@@ -32,6 +32,7 @@ from data import init_data, remove_duplicate_tokens, prepare_dataset
 from nsml import DATASET_PATH
 
 import warnings
+
 warnings.filterwarnings(action='ignore')
 
 if is_apex_available():
@@ -96,6 +97,12 @@ class DataTrainingArguments:
         },
     )
     split: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Which split to use",
+        },
+    )
+    max_split: Optional[int] = field(
         default=None,
         metadata={
             "help": "Which split to use",
@@ -233,7 +240,7 @@ class CTCTrainer(Trainer):
     def __init__(self, **kwargs):
         super(CTCTrainer, self).__init__(**kwargs)
         self.cur_step = 0
-        self.report_interval = 10
+        self.report_interval = 100
 
     def training_step(
             self, model: nn.Module,
@@ -257,7 +264,7 @@ class CTCTrainer(Trainer):
         """
 
         self.cur_step += 1
-        print(self.cur_step)
+        # print(self.cur_step)
         gc.collect()
         # print(get_gpu_info())
         model.train()
@@ -292,8 +299,9 @@ class CTCTrainer(Trainer):
         else:
             loss.backward()
 
-        if self.cur_step % self.report_interval==0:
-            nsml.report(step = self.cur_step, batch_loss = loss.detach().item())
+        if self.cur_step % self.report_interval == 0:
+            print(self.cur_step)
+            nsml.report(step=self.cur_step, batch_loss=loss.detach().item())
         return loss.detach()
 
 
@@ -459,4 +467,4 @@ if __name__ == "__main__":
 
         print("Training start")
         trainer.train()
-        #processor.save_pretrained('./kowav-processor')
+        processor.save_pretrained('./kowav-processor')
