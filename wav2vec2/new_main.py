@@ -26,7 +26,8 @@ from transformers.trainer_callback import TrainerControl, TrainerState
 from transformers import (HfArgumentParser, Trainer, TrainingArguments,
                           Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
                           Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
-                          trainer_utils, TrainerCallback)
+                          trainer_utils, TrainerCallback, AutoTokenizer,
+                          AutoModelForPreTraining)
 
 from data import init_data, remove_duplicate_tokens, prepare_dataset
 from nsml import DATASET_PATH
@@ -77,6 +78,10 @@ class ModelArguments:
     verbose_logging: Optional[bool] = field(
         default=False,
         metadata={"help": "Whether to log verbose messages or not."},
+    )
+    pause: Optional[int] = field(
+        default=0,
+        metadata={"help": "Whether to submit or not"},
     )
 
 
@@ -340,13 +345,15 @@ def bind_model(model, parser):
         print("로딩 완료!")
 
     def infer(test_path, **kwparser):
-        test_file_list = path_loader(test_path, is_test=True)
-        test_dataset = prepare_dataset(test_file_list, None, mode='test')
+        test_file_list = path_loader(test_path)
+        test_dataset = prepare_dataset(test_file_list, None, processor,
+                                       data_args)
+        result_list = []
 
         def map_to_result(batch):
             model.to(device)
             input_values = processor(
-                batch["speech"],
+                batch["data"],
                 sampling_rate=batch["sampling_rate"],
                 return_tensors="pt").input_values.to("cuda")
 
@@ -354,19 +361,22 @@ def bind_model(model, parser):
                 logits = model(input_values).logits
 
             pred_ids = torch.argmax(logits, dim=-1)
-            pred_ids = remove_duplicate_tokens(pred_ids.numpy(), processor)
-            batch["pred_str"] = join_jamos(processor.batch_decode(pred_ids)[0])
+            pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
+                                               processor)
+            result_list.append(
+                list(join_jamos(processor.batch_decode(pred_ids)[0])))
 
-            return batch
+            return None
 
         results = test_dataset.map(map_to_result)
 
-        prob = [1] * len(results)
+        prob = [1] * len(result_list)
+        print(result_list[0])
 
         # DONOTCHANGE: They are reserved for nsml
         # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
         # return list(zip(pred.flatten(), clipped.flatten()))
-        return list(zip(prob, results))
+        return list(zip(prob, result_list))
 
     # DONOTCHANGE: They are reserved for nsml
     # nsml에서 지정한 함수에 접근할 수 있도록 하는 함수입니다.
@@ -382,8 +392,7 @@ def path_loader(root_path):
         return file_list, label
 
     else:
-        test_path = os.path.join(root_path, 'test')
-        file_list = sorted(glob(os.path.join(test_path, 'test_data', '*')))
+        file_list = sorted(glob(os.path.join(root_path, 'test_data', '*')))
 
         return file_list
 
@@ -402,6 +411,7 @@ if __name__ == "__main__":
                                      unk_token="[UNK]",
                                      pad_token="[PAD]",
                                      word_delimiter_token="|")
+    # tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
 
     feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1,
                                                  sampling_rate=16000,
@@ -414,12 +424,21 @@ if __name__ == "__main__":
 
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
+<<<<<<< HEAD
         cache_dir=model_args.cache_dir,
         gradient_checkpointing=model_args.gradient_checkpointing_2,
         vocab_size=len(processor.tokenizer),
+=======
+        # cache_dir=model_args.cache_dir,
+        # gradient_checkpointing=model_args.gradient_checkpointing,
+        # vocab_size=len(processor.tokenizer),
+>>>>>>> c0ddbd2 (Fix submit errors)
     )
 
     bind_model(model, training_args)
+    nsml.save(0)
+    if model_args.pause:
+        nsml.paused(scope=locals())
 
     file_list, label = path_loader(DATASET_PATH)
 
