@@ -1,5 +1,5 @@
 #! /bin/bash
-sleep 1m # Be patient!
+sleep 0 # Be patient!
 nsml run -e ./wav2vec2/new_main.py -d stt_1 \
     -c 8 -g 1 --memory 70G --shm-size 13G -a \
     "--output_dir ./wav2vec2-korean-1
@@ -15,8 +15,7 @@ nsml run -e ./wav2vec2/new_main.py -d stt_1 \
     --warmup_steps 1000 
     --fp16 True 
     --preprocessing_num_workers 8
-    --length_column_name length
-    --group_by_length True 
+    --group_by_length False
     --freeze_feature_extractor True 
     --mode train
     --split 0

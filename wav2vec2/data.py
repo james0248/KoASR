@@ -15,61 +15,61 @@ import os
 def init_data():
     vocab = {
         "[PAD]": 0,
-        "[UNK]": 3,
-        "|": 4,
-        "ㄱ": 5,
-        "ㄴ": 6,
-        "ㄷ": 7,
-        "ㄹ": 8,
-        "ㅁ": 9,
-        "ㅂ": 10,
-        "ㅅ": 11,
-        "ㅇ": 12,
-        "ㅈ": 13,
-        "ㅊ": 14,
-        "ㅋ": 15,
-        "ㅌ": 16,
-        "ㅍ": 17,
-        "ㅎ": 18,
-        "ㄲ": 19,
-        "ㄸ": 20,
-        "ㅃ": 21,
-        "ㅆ": 22,
-        "ㅉ": 23,
-        "ㅏ": 24,
-        "ㅐ": 25,
-        "ㅑ": 26,
-        "ㅒ": 27,
-        "ㅓ": 28,
-        "ㅔ": 29,
-        "ㅕ": 30,
-        "ㅖ": 31,
-        "ㅗ": 32,
-        "ㅘ": 33,
-        "ㅙ": 34,
-        "ㅚ": 35,
-        "ㅛ": 36,
-        "ㅜ": 37,
-        "ㅝ": 38,
-        "ㅞ": 39,
-        "ㅟ": 40,
-        "ㅠ": 41,
-        "ㅡ": 42,
-        "ㅢ": 43,
-        "ㅣ": 44,
-        "ㄳ": 45,
-        "ㄵ": 46,
-        "ㄶ": 47,
-        "ㄺ": 48,
-        "ㄻ": 49,
-        "ㄼ": 50,
-        "ㄽ": 51,
-        "ㄾ": 52,
-        "ㄿ": 53,
-        "ㅀ": 54,
-        "ㅄ": 55,
+        "[UNK]": 1,
+        "|": 2,
+        "ㄱ": 3,
+        "ㄴ": 4,
+        "ㄷ": 5,
+        "ㄹ": 6,
+        "ㅁ": 7,
+        "ㅂ": 8,
+        "ㅅ": 9,
+        "ㅇ": 10,
+        "ㅈ": 11,
+        "ㅊ": 12,
+        "ㅋ": 13,
+        "ㅌ": 14,
+        "ㅍ": 15,
+        "ㅎ": 16,
+        "ㄲ": 17,
+        "ㄸ": 18,
+        "ㅃ": 19,
+        "ㅆ": 20,
+        "ㅉ": 21,
+        "ㅏ": 22,
+        "ㅐ": 23,
+        "ㅑ": 24,
+        "ㅒ": 25,
+        "ㅓ": 26,
+        "ㅔ": 27,
+        "ㅕ": 28,
+        "ㅖ": 29,
+        "ㅗ": 30,
+        "ㅘ": 31,
+        "ㅙ": 32,
+        "ㅚ": 33,
+        "ㅛ": 34,
+        "ㅜ": 35,
+        "ㅝ": 36,
+        "ㅞ": 37,
+        "ㅟ": 38,
+        "ㅠ": 39,
+        "ㅡ": 40,
+        "ㅢ": 41,
+        "ㅣ": 42,
+        "ㄳ": 43,
+        "ㄵ": 44,
+        "ㄶ": 45,
+        "ㄺ": 46,
+        "ㄻ": 47,
+        "ㄼ": 48,
+        "ㄽ": 49,
+        "ㄾ": 50,
+        "ㄿ": 51,
+        "ㅀ": 52,
+        "ㅄ": 53,
     }
-    os.makedirs('./kowav-processor',exist_ok=True)
+    os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
         json.dump(vocab, vocab_file)
 
@@ -84,7 +84,7 @@ def remove_duplicate_tokens(token_list, processor):
             prev_token = token
             clean_token_list.append(token)
 
-    return clean_token_list
+    return [clean_token_list]
 
 
 def decode_CTC(token_list, processor):
@@ -117,7 +117,8 @@ def map_to_array(batch, index):
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
     # del resampled_data, data
-    if (index < 12800 and index % 100 == 0):
+
+    if (index % 1000 == 0):
         print(index)
     return batch
 
@@ -130,9 +131,9 @@ def preprocess_dataset(batch, processor):
 
     batch["input_values"] = processor(
         batch["data"], sampling_rate=batch["sampling_rate"][0]).input_values
-    
+
     batch["length"] = [len(x) for x in batch["input_values"]]
-    
+
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
 
@@ -180,14 +181,18 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
         # change data to array
         print("Start changing to array")
 
-        train_data = train_data.map(map_to_array,
-                                    remove_columns=train_data.column_names,
-                                    num_proc=args.preprocessing_num_workers,
-                                    with_indices=True)
-        val_data = val_data.map(map_to_array,
-                                remove_columns=val_data.column_names,
-                                num_proc=args.preprocessing_num_workers,
-                                with_indices=True)
+        train_data = train_data.map(
+            map_to_array,
+            remove_columns=train_data.column_names,
+            num_proc=args.preprocessing_num_workers,
+            with_indices=True,
+        )
+        val_data = val_data.map(
+            map_to_array,
+            remove_columns=val_data.column_names,
+            num_proc=args.preprocessing_num_workers,
+            with_indices=True,
+        )
 
         print("Start preprocess")
 
@@ -207,16 +212,21 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
         return train_data, val_data
 
     else:
+        set_verbosity_error()  #disable logging
         data = pd.DataFrame({'file_name': file_list})
-        data['path'] = data['path'].apply(
-            lambda row: os.path.join(DATASET_PATH, 'test', 'test_data', row))
-        data['target_text'] = None
+        print(len(data))
+        data['path'] = data['file_name'].apply(
+            lambda row: os.path.join(DATASET_PATH, 'test_data', row))
+        data['text'] = None
         test_data = Dataset.from_pandas(data)
         print("Start changing to array")
-        test_data.map(
+        test_data = test_data.map(
             map_to_array,
             remove_columns=test_data.column_names,
+            num_proc=args.preprocessing_num_workers,
+            with_indices=True,
         )
         print("Finished changing to array")
+        set_verbosity_info()
 
         return test_data
