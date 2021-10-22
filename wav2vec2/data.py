@@ -2,7 +2,7 @@ import pandas as pd
 import re
 import json
 import librosa
-from hangul_utils import join_jamos
+from hangul_utils import join_jamos, split_syllables
 from sklearn.model_selection import train_test_split
 from datasets import Dataset, load_from_disk
 
@@ -100,8 +100,9 @@ def extract_all_chars(batch):
     return {"vocab": [vocab], "all_text": [all_text]}
 
 
-def remove_special_characters(batch):
+def split_and_remove_special_characters(batch):
     chars_to_ignore_regex = '[\,\?\.\!\-\;\:\"\“\%\‘\”]'
+    batch["text"] = split_syllables(batch["text"])
     batch["text"] = re.sub(chars_to_ignore_regex, '',
                            batch["text"]).lower() + " "
     return batch
@@ -136,7 +137,8 @@ def preprocess_dataset(batch, processor):
 
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
-
+    #print(batch["target_text"])
+    #print(batch["labels"])
     return batch
 
 
@@ -163,11 +165,11 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
             val)  #  IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
 
         train_data = train_data.map(
-            remove_special_characters,
+            split_and_remove_special_characters,
             num_proc=args.preprocessing_num_workers,
         )
         val_data = val_data.map(
-            remove_special_characters,
+            split_and_remove_special_characters,
             num_proc=args.preprocessing_num_workers,
         )
 
@@ -201,11 +203,17 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
             batched=True,
             num_proc=args.preprocessing_num_workers,
             fn_kwargs={'processor': processor},
+            writer_batch_size=args.writer_batch_size,
+            batch_size=args.writer_batch_size            
         )
-        val_data = val_data.map(preprocess_dataset,
-                                batched=True,
-                                num_proc=args.preprocessing_num_workers,
-                                fn_kwargs={'processor': processor})
+        val_data = val_data.map(
+            preprocess_dataset,
+            batched=True,
+            num_proc=args.preprocessing_num_workers,
+            fn_kwargs={'processor': processor},
+            writer_batch_size=args.writer_batch_size,
+            batch_size=args.writer_batch_size
+        )
 
         set_verbosity_info()
 
