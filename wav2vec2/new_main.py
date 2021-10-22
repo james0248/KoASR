@@ -363,12 +363,11 @@ def bind_model(model, parser):
             pred_ids = torch.argmax(logits, dim=-1)
             pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
                                                processor)
-            result_list.append(
-                list(join_jamos(processor.batch_decode(pred_ids)[0])))
+            result_list.append(join_jamos(processor.batch_decode(pred_ids)[0]))
 
             return None
 
-        results = test_dataset.map(map_to_result)
+        test_dataset.map(map_to_result)
 
         prob = [1] * len(result_list)
         print(result_list[0])
@@ -424,19 +423,12 @@ if __name__ == "__main__":
 
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
-<<<<<<< HEAD
         cache_dir=model_args.cache_dir,
         gradient_checkpointing=model_args.gradient_checkpointing_2,
         vocab_size=len(processor.tokenizer),
-=======
-        # cache_dir=model_args.cache_dir,
-        # gradient_checkpointing=model_args.gradient_checkpointing,
-        # vocab_size=len(processor.tokenizer),
->>>>>>> c0ddbd2 (Fix submit errors)
     )
 
     bind_model(model, training_args)
-    nsml.save(0)
     if model_args.pause:
         nsml.paused(scope=locals())
 

@@ -2,10 +2,10 @@
 sleep 120 # Be patient!
 nsml run -e ./wav2vec2/new_main.py -d stt_2 \
     -c 8 -g 1 --memory 70G --shm-size 13G -a \
-    "--output_dir ./wav2vec2-korean-2
-    --num_train_epochs 1
-    --per_device_train_batch_size 1
-    --per_device_eval_batch_size 1
+    "--output_dir ./wav2vec2-korean-1
+    --num_train_epochs 5
+    --per_device_train_batch_size 8
+    --per_device_eval_batch_size 8
     --evaluation_strategy steps 
     --save_total_limit 3 
     --save_steps 700 
@@ -15,8 +15,7 @@ nsml run -e ./wav2vec2/new_main.py -d stt_2 \
     --model_name_or_path facebook/wav2vec2-large-xlsr-53 
     --fp16 True 
     --preprocessing_num_workers 8
-    --group_by_length True 
+    --group_by_length False
     --freeze_feature_extractor True 
     --mode train
-    --split 0
-    --max_split 20" 
+    --gradient_accumulation_steps 10"
