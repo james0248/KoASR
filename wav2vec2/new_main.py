@@ -247,7 +247,7 @@ class NSMLCallback(TrainerCallback):
         print(state.best_metric)
     def on_evaluate(self, args: TrainingArguments, state: TrainerState,
                      control: TrainerControl, metrics, **kwargs):
-        print(metrics)
+        # print(metrics)
         nsml.report(step = state.epoch, cer = metrics["eval_cer"], wer = metrics["eval_wer"])
 
 
@@ -373,7 +373,7 @@ def bind_model(model, parser):
                 logits = model(input_values).logits
 
             pred_ids = torch.argmax(logits, dim=-1)
-            print(pred_ids)
+            #print(pred_ids)
             pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
                                                processor)
             result_list.append(join_jamos(processor.batch_decode(pred_ids)[0]))
@@ -448,7 +448,7 @@ if __name__ == "__main__":
     file_list, label = path_loader(DATASET_PATH)
 
     if data_args.mode == 'train':
-        #nsml.load(checkpoint='1',session='nia1030/stt_1/421')
+        nsml.load(checkpoint='1',session='nia1030/stt_1/421')
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
@@ -473,7 +473,8 @@ if __name__ == "__main__":
             # we do not want to group tokens when computing the metrics
             label_str = processor.batch_decode(pred.label_ids,
                                                group_tokens=False)
-            print(pred_str, label_str)
+            print(f"pred : {pred_str[:5]}")
+            print(f"label : {label_str[:5]}")
             wer = wer_metric.compute(predictions=pred_str,
                                      references=label_str)
             cer = cer_metric.compute(predictions=pred_str,
