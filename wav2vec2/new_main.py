@@ -7,6 +7,7 @@ from glob import glob
 import pickle
 import sys
 import os
+import shutil
 from dataclasses import dataclass, field
 from datasets.search import NearestExamplesResults
 
@@ -239,6 +240,10 @@ class NSMLCallback(TrainerCallback):
         nsml.save(int(state.epoch))
         #print(state.epoch)
         print(state.best_metric)
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState,
+                     control: TrainerControl, metrics, **kwargs):
+        print(metrics)
+        nsml.report(step = state.epoch, cer = metrics["eval_cer"], wer = metrics["eval_wer"])
 
 
 class CTCTrainer(Trainer):
@@ -443,6 +448,7 @@ if __name__ == "__main__":
         print("Finished dataset preparation")
 
         wer_metric = datasets.load_metric("wer")
+        cer_metric = datasets.load_metric("cer")
 
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
@@ -460,8 +466,9 @@ if __name__ == "__main__":
                                                group_tokens=False)
             wer = wer_metric.compute(predictions=pred_str,
                                      references=label_str)
-
-            return {"wer": wer}
+            cer = cer_metric.compute(predictions=pred_str,
+                                     references=label_str)
+            return {"wer": wer, "cer": cer}
 
         if model_args.freeze_feature_extractor:
             model.freeze_feature_extractor()
@@ -479,4 +486,11 @@ if __name__ == "__main__":
 
         print("Training start")
         trainer.train()
-        processor.save_pretrained('./kowav-processor')
+        print("Training done!")
+        #clear disk
+        train_dataset.cleanup_cache_files()
+        val_dataset.cleanup_cache_files()
+        
+        shutil.rmtree('./train_temp')
+        shutil.rmtree('./val_temp')
+        print('Cleaning done!')

@@ -117,6 +117,7 @@ def map_to_array(batch, index):
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
     # del resampled_data, data
+
     if (index % 1000 == 0):
         print(index)
     return batch
