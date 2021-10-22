@@ -119,7 +119,7 @@ def map_to_array(batch, index):
     batch['target_text'] = batch['text']
     # del resampled_data, data
 
-    if (index % 1000 == 0):
+    if (index % 1000 == 0 and index<=12800):
         print(index)
     return batch
 

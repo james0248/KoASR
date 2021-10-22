@@ -448,7 +448,7 @@ if __name__ == "__main__":
     file_list, label = path_loader(DATASET_PATH)
 
     if data_args.mode == 'train':
-        nsml.load(checkpoint='1',session='nia1030/stt_1/421')
+        nsml.load(checkpoint='0',session='nia1030/stt_1/421')
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
@@ -473,8 +473,8 @@ if __name__ == "__main__":
             # we do not want to group tokens when computing the metrics
             label_str = processor.batch_decode(pred.label_ids,
                                                group_tokens=False)
-            print(f"pred : {pred_str[:5]}")
-            print(f"label : {label_str[:5]}")
+            print(f"pred : {[join_jamos(x) for x in pred_str[:5]]}")
+            print(f"label : {[join_jamos(x) for x in label_str[:5]]}")
             wer = wer_metric.compute(predictions=pred_str,
                                      references=label_str)
             cer = cer_metric.compute(predictions=pred_str,
