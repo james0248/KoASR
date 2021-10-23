@@ -28,7 +28,8 @@ from datasets import load_metric
 from data import prepare_dataset
 
 
-print('torch version: ',torch.__version__)
+print('torch version: ', torch.__version__)
+
 
 def evaluate(model, batch):
     '''
@@ -38,22 +39,21 @@ def evaluate(model, batch):
     model.eval()
     # Load processor from dictionary
     processor = dict_for_infer['processor']
-    
+
     # input_values = processor(
-    #   batch["speech"], 
-    #   sampling_rate=batch["sampling_rate"], 
+    #   batch["speech"],
+    #   sampling_rate=batch["sampling_rate"],
     #   return_tensors="pt"
     # ).input_values.to(device)
     input_values = batch["input_values"]
-    
+
     with torch.no_grad():
         logits = model(input_values).logits
-    
+
     pred_ids = torch.argmax(logits, dim=-1)
     batch["pred_str"] = processor.batch_decode(pred_ids)
     pred_str = batch["pred_str"]
     return pred_str
-
 
 
 def train_step(batch_item, training):
@@ -72,7 +72,7 @@ def train_step(batch_item, training):
         lr_scheduler.step()
         optimizer.zero_grad()
         return loss
-        
+
     else:
         model.eval()
         with torch.no_grad():
@@ -85,6 +85,7 @@ def train_step(batch_item, training):
         # TODO define metric
         acc = 0
         return loss, acc
+
 
 '''
 def loss_function(real, pred):
@@ -105,23 +106,27 @@ def accuracy_function(real, pred):
 
     return torch.sum(accuracies) / torch.sum(mask)
 '''
-def path_loader(root_path, is_test= False):
+
+
+def path_loader(root_path, is_test=False):
 
     if is_test:
         file_list = sorted(glob(os.path.join(root_path, 'test_data', '*')))
 
         return file_list
 
-    if args.mode == 'train' :
+    if args.mode == 'train':
         train_path = os.path.join(root_path, 'train')
         file_list = sorted(glob(os.path.join(train_path, 'train_data', '*')))
         label = pd.read_csv(os.path.join(train_path, 'train_label'))
 
     return file_list, label
 
+
 def save_checkpoint(checkpoint, dir):
 
     torch.save(checkpoint, os.path.join(dir))
+
 
 def bind_model(model, parser):
     # 학습한 모델을 저장하는 함수입니다.
@@ -130,7 +135,7 @@ def bind_model(model, parser):
         os.makedirs(dir_name, exist_ok=True)
         save_dir = os.path.join(dir_name, 'checkpoint')
         save_checkpoint(dict_for_infer, save_dir)
-        
+
         with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
             pickle.dump(dict_for_infer, f)
 
@@ -149,7 +154,7 @@ def bind_model(model, parser):
         global dict_for_infer
         with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
             dict_for_infer = pickle.load(f)
-        
+
         print("로딩 완료!")
 
     def infer(test_path, **kwparser):
@@ -157,8 +162,8 @@ def bind_model(model, parser):
         test_file_list = path_loader(test_path, is_test=True)
 
         processor = dict_for_infer["processor"]
-        test_data = prepare_dataset(test_file_list, None, is_test = True)
-        test_data_loader = DataLoader(test_data, batch_size=64, shuffle = False)
+        test_data = prepare_dataset(test_file_list, None, is_test=True)
+        test_data_loader = DataLoader(test_data, batch_size=64, shuffle=False)
 
         result_list = []
         for step, batch in enumerate(test_data_loader):
@@ -166,7 +171,7 @@ def bind_model(model, parser):
             result_list.extend(output)
 
         prob = [1] * len(result_list)
-        
+
         # DONOTCHANGE: They are reserved for nsml
         # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
         # return list(zip(pred.flatten(), clipped.flatten()))
@@ -273,10 +278,10 @@ if __name__ == '__main__':
 
     report_interval = 10
     total_step = -1
-    
+
     epochs = args.epochs
 
-    learning_rate = 5e-5 # 5e-5
+    learning_rate = 5e-5  # 5e-5
     batch_size = 64
 
     logger = logging.getLogger(__name__)
@@ -293,21 +298,20 @@ if __name__ == '__main__':
         feat_proj_dropout=0.0,
         mask_time_prob=0.05,
         layerdrop=0.1,
-        gradient_checkpointing=True,
+        gradient_checkpointing_=True,
         ctc_loss_reduction="mean",
         pad_token_id=processor.tokenizer.pad_token_id,
         vocab_size=len(processor.tokenizer)
-        )
+    )
     # TODO NameError: name 'processor' is not defined ㅠㅠ
-    
+
     bind_model(model=model, parser=args)
-    if args.pause :
+    if args.pause:
         nsml.paused(scope=locals())
 
-    if args.mode == 'train' :
+    if args.mode == 'train':
         file_list, label = path_loader(DATASET_PATH)
 
-        
         train_data, val_data = prepare_dataset(file_list, label)
         logger.info(train_data[0])
 
@@ -329,17 +333,16 @@ if __name__ == '__main__':
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
 
-        train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle = True)
-        valid_dataloader = DataLoader(val_data, batch_size=batch_size, shuffle = True)
-        
-        
-        logger.warning(f"Number of batches : len(train) = {len(train_dataloader)}, len(valid) = {len(valid_dataloader)}")
+        train_dataloader = DataLoader(
+            train_data, batch_size=batch_size, shuffle=True)
+        valid_dataloader = DataLoader(
+            val_data, batch_size=batch_size, shuffle=True)
 
+        logger.warning(
+            f"Number of batches : len(train) = {len(train_dataloader)}, len(valid) = {len(valid_dataloader)}")
 
         # load model from session checkpoint
         #nsml.load(checkpoint='0', session='nia1030/stt_1/5')
-
-        
 
         # Set optimizer, scheduler
         optimizer = AdamW(model.parameters(), lr=learning_rate)
@@ -363,25 +366,24 @@ if __name__ == '__main__':
 
             training = True
             for step, batch in enumerate(train_dataloader):
-                if(step == total_step):  break
+                if(step == total_step):
+                    break
                 batch_loss = train_step(batch, training)
                 batch_loss = batch_loss.detach().item()
                 total_train_loss += batch_loss
-                
+
                 if step == 0:
                     pprint.pprint(get_gpu_info())
-                if step%report_interval == 0:
-                    nsml.report(step = step, batch_loss = batch_loss)
+                if step % report_interval == 0:
+                    nsml.report(step=step, batch_loss=batch_loss)
                     logger.info(f"[{step}/{len(train_dataloader)}] \
                      batch_loss = {batch_loss}")
-
 
             training = False
             for step, batch in enumerate(valid_dataloader):
                 batch_loss, batch_acc = train_step(batch, training)
                 total_valid_loss += batch_loss
                 total_valid_acc += batch_acc
-
 
             logger.warning('=================loss=================')
             logger.warning(f'total_train_loss: {total_train_loss}')
@@ -391,22 +393,22 @@ if __name__ == '__main__':
             logger.warning('=================acc=================')
             logger.warning(f'total_train_acc : {total_train_acc}')
             logger.warning(f'total_valid_acc : {total_valid_acc}')
-            logger.warning(f'average_train_acc : {total_train_acc/len(train_dataloader)}')
-            logger.warning(f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
+            logger.warning(
+                f'average_train_acc : {total_train_acc/len(train_dataloader)}')
+            logger.warning(
+                f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
             logger.warning('\n')
-
 
             dict_for_infer = {
 
-                'model' : model.state_dict(),
-                'processor' : processor,
+                'model': model.state_dict(),
+                'processor': processor,
                 'epochs': epochs,
                 'learning_rate': learning_rate,
-                'tokenizer' : tokenizer,
-                'device' : device
+                'tokenizer': tokenizer,
+                'device': device
 
             }
 
-            
             # DONOTCHANGE (You can decide how often you want to save the model)
             nsml.save(epoch)

@@ -55,12 +55,50 @@ class ModelArguments:
         metadata={
             "help":
             "Path to pretrained model or model identifier from huggingface.co/models"
-        })
+        },
+    )
     cache_dir: Optional[str] = field(
         default=None,
         metadata={
             "help":
             "Where do you want to store the pretrained models downloaded from huggingface.co"
+        },
+    )
+    data_type: int = field(
+        default=None,
+        metadata={
+            "help":
+            "Select dataset"
+        },
+    )
+    attention_dropout: Optional[float] = field(
+        default=0.1, metadata={
+            "help": "The dropout ratio for the attention probabilities."
+        },
+    )
+    activation_dropout: Optional[float] = field(
+        default=0.1, metadata={
+            "help": "The dropout ratio for activations inside the fully connected layer."
+        },
+    )
+    hidden_dropout: Optional[float] = field(
+        default=0.1,
+        metadata={
+            "help": "The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler."
+        },
+    )
+    feat_proj_dropout: Optional[float] = field(
+        default=0.1,
+        metadata={
+            "help": "The dropout probabilitiy for all 1D convolutional layers in feature extractor."
+        },
+    )
+    mask_time_prob: Optional[float] = field(
+        default=0.05,
+        metadata={
+            "help": "Propability of each feature vector along the time axis to be chosen as the start of the vector"
+            "span to be masked. Approximately ``mask_time_prob * sequence_length // mask_time_length`` feature"
+            "vectors will be masked along the time axis. This is only relevant if ``apply_spec_augment is True``."
         },
     )
     freeze_feature_extractor: Optional[bool] = field(
@@ -69,7 +107,7 @@ class ModelArguments:
             "help":
             "Whether to freeze the feature extractor layers of the model."
         })
-    gradient_checkpointing_2: Optional[bool] = field(
+    gradient_checkpointing_: Optional[bool] = field(
         default=False,
         metadata={
             "help":
@@ -83,6 +121,12 @@ class ModelArguments:
     pause: Optional[int] = field(
         default=0,
         metadata={"help": "Whether to submit or not"},
+    )
+    layerdrop: Optional[float] = field(
+        default=0.0,
+        metadata={
+            "help": "The LayerDrop probability."
+        }
     )
 
 
@@ -157,7 +201,6 @@ class DataTrainingArguments:
         default=1000,
         metadata={"help": "Disk and memory"},
     )
-
 
 
 @dataclass
@@ -243,12 +286,13 @@ class NSMLCallback(TrainerCallback):
             'device': device,
         }
         nsml.save(int(state.epoch))
-        #print(state.epoch)
+        # print(state.epoch)
         print(state.best_metric)
     def on_evaluate(self, args: TrainingArguments, state: TrainerState,
-                     control: TrainerControl, metrics, **kwargs):
+                    control: TrainerControl, metrics, **kwargs):
         # print(metrics)
-        nsml.report(step = state.epoch, cer = metrics["eval_cer"], wer = metrics["eval_wer"])
+        nsml.report(step=state.epoch,
+                    cer=metrics["eval_cer"], wer=metrics["eval_wer"])
 
 
 class CTCTrainer(Trainer):
@@ -316,7 +360,7 @@ class CTCTrainer(Trainer):
             loss.backward()
 
         if self.cur_step % self.report_interval == 0:
-            print(self.cur_step)
+            print(f'step: {self.cur_step}')
             nsml.report(step=self.cur_step, batch_loss=loss.detach().item())
         return loss.detach()
 
@@ -373,7 +417,7 @@ def bind_model(model, parser):
                 logits = model(input_values).logits
 
             pred_ids = torch.argmax(logits, dim=-1)
-            #print(pred_ids)
+            # print(pred_ids)
             pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
                                                processor)
             result_list.append(join_jamos(processor.batch_decode(pred_ids)[0]))
@@ -437,7 +481,13 @@ if __name__ == "__main__":
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
-        gradient_checkpointing=model_args.gradient_checkpointing_2,
+        activation_dropout=model_args.activation_dropout,
+        attention_dropout=model_args.attention_dropout,
+        hidden_dropout=model_args.hidden_dropout,
+        feat_proj_dropout=model_args.feat_proj_dropout,
+        mask_time_prob=model_args.mask_time_prob,
+        gradient_checkpointing=model_args.gradient_checkpointing_,
+        layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
 
@@ -448,7 +498,12 @@ if __name__ == "__main__":
     file_list, label = path_loader(DATASET_PATH)
 
     if data_args.mode == 'train':
-        nsml.load(checkpoint='0',session='nia1030/stt_1/421')
+        if model_args.data_type == 1:
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='0', session='nia1030/stt_1/460')
+        elif model_args.data_type == 2:
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='0', session='nia1030/stt_2/79')
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
@@ -498,10 +553,10 @@ if __name__ == "__main__":
         print("Training start")
         trainer.train()
         print("Training done!")
-        #clear disk
+        # clear disk
         train_dataset.cleanup_cache_files()
         val_dataset.cleanup_cache_files()
-        
+
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
         print('Cleaning done!')
