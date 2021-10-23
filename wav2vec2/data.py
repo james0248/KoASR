@@ -1,3 +1,4 @@
+import gc
 import pandas as pd
 import re
 import json
@@ -108,7 +109,7 @@ def split_and_remove_special_characters(batch):
     return batch
 
 
-def map_to_array(batch, index):
+def map_to_array(batch, idx):
     data, sampling_rate = librosa.load(batch['path'], sr=None)
     resampled_data = librosa.resample(data,
                                       sampling_rate,
@@ -117,10 +118,11 @@ def map_to_array(batch, index):
     batch['data'] = resampled_data
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
-    # del resampled_data, data
+    del resampled_data, data
 
-    if (index % 1000 == 0 and index<=12800):
-        print(index)
+    if (idx % 5000 == 0):
+        print(idx)
+        gc.collect()
     return batch
 
 
@@ -137,14 +139,16 @@ def preprocess_dataset(batch, processor):
 
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
-    #print(batch["target_text"])
-    #print(batch["labels"])
+    # print(batch["target_text"])
+    # print(batch["labels"])
+    del batch["target_text"], batch["data"], batch["sampling_rate"]
+    gc.collect()
     return batch
 
 
 def prepare_dataset(file_list, df, processor, args, val_size=0.1):
     if args.mode == 'train':
-        set_verbosity_error()  #disable logging
+        set_verbosity_error()  # disable logging
 
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
@@ -162,7 +166,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
         train_data = Dataset.from_pandas(
             train)  # THESE HAD TO BE USED VERY CAREFULLY.
         val_data = Dataset.from_pandas(
-            val)  #  IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
+            val)  # IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
 
         train_data = train_data.map(
             split_and_remove_special_characters,
@@ -204,7 +208,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
             num_proc=args.preprocessing_num_workers,
             fn_kwargs={'processor': processor},
             writer_batch_size=args.writer_batch_size,
-            batch_size=args.writer_batch_size            
+            batch_size=args.writer_batch_size
         )
         val_data = val_data.map(
             preprocess_dataset,
@@ -220,7 +224,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
         return train_data, val_data
 
     else:
-        set_verbosity_error()  #disable logging
+        set_verbosity_error()  # disable logging
         data = pd.DataFrame({'file_name': file_list})
         print(len(data))
         data['path'] = data['file_name'].apply(
