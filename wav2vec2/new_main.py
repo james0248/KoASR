@@ -420,8 +420,9 @@ def bind_model(model, parser):
             # print(pred_ids)
             pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
                                                processor)
+            punctuation = '.' if model_args.data_type == 1 else ''
             result_list.append(join_jamos(
-                processor.batch_decode(pred_ids)[0]) + '.')
+                processor.batch_decode(pred_ids)[0]) + punctuation)
 
             return None
 
