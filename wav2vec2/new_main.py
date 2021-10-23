@@ -420,7 +420,8 @@ def bind_model(model, parser):
             # print(pred_ids)
             pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
                                                processor)
-            result_list.append(join_jamos(processor.batch_decode(pred_ids)[0]))
+            result_list.append(join_jamos(
+                processor.batch_decode(pred_ids)[0]) + '.')
 
             return None
 
@@ -500,7 +501,7 @@ if __name__ == "__main__":
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
-            nsml.load(checkpoint='0', session='nia1030/stt_1/460')
+            nsml.load(checkpoint='2', session='nia1030/stt_1/476')
         elif model_args.data_type == 2:
             # print("No pretrained model yet")
             nsml.load(checkpoint='0', session='nia1030/stt_2/79')
