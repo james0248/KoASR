@@ -26,7 +26,6 @@ nsml run -e ./wav2vec2/new_main.py -d stt_2 \
     --freeze_feature_extractor True 
     --mode train
     --gradient_accumulation_steps 10
-    --gradient_checkpointing_ True
     --eval_accumulation_steps 500
     --writer_batch_size 500
     --data_type 2" 

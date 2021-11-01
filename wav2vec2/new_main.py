@@ -502,7 +502,7 @@ if __name__ == "__main__":
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
-            nsml.load(checkpoint='2', session='nia1030/stt_1/476')
+            nsml.load(checkpoint='0', session='nia1030/stt_2/87')
         elif model_args.data_type == 2:
             # print("No pretrained model yet")
             nsml.load(checkpoint='0', session='nia1030/stt_2/79')
