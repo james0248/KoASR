@@ -1,6 +1,6 @@
 #! /bin/bash
-sleep 0 # Be patient!
-nsml run -e ./wav2vec2/new_main.py -d stt_2 \
+sleep 0m # Be patient!
+nsml run -e ./wav2vec2/new_main.py -d final_stt_2 \
     -c 8 -g 1 --memory 70G --shm-size 13G -a \
     "--output_dir ./wav2vec2-korean-2
     --model_name_or_path facebook/wav2vec2-large-xlsr-53 
@@ -21,12 +21,15 @@ nsml run -e ./wav2vec2/new_main.py -d stt_2 \
     --mask_time_prob 0.082
     --fp16 True 
     --preprocessing_num_workers 8
+    --dataloader_num_workers 8
     --group_by_length True
     --length_column_name length
     --freeze_feature_extractor True 
     --mode train
     --gradient_accumulation_steps 10
-    --gradient_checkpointing_ True
     --eval_accumulation_steps 500
     --writer_batch_size 500
-    --data_type 2" 
+    --max_split 1
+    --split 0
+    --data_type 1
+    " 

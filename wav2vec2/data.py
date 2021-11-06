@@ -1,5 +1,6 @@
 import gc
 import pandas as pd
+import numpy as np
 import re
 import json
 import librosa
@@ -11,7 +12,7 @@ from datasets.utils.logging import set_verbosity_error, set_verbosity_info
 
 from nsml import DATASET_PATH
 import os
-
+import time
 
 def init_data():
     vocab = {
@@ -110,12 +111,26 @@ def split_and_remove_special_characters(batch):
 
 
 def map_to_array(batch, idx):
-    data, sampling_rate = librosa.load(batch['path'], sr=None)
+    try:
+        data, sampling_rate = librosa.load(batch['path'], sr=None)
+    except:
+        with open(batch['path'], 'rb') as opened_pcm_file:
+            buf = opened_pcm_file.read()
+            pcm_data = np.frombuffer(buf, dtype = 'int16')
+            data = librosa.util.buf_to_float(pcm_data, 2)
+            sampling_rate = 16_000
     resampled_data = librosa.resample(data,
                                       sampling_rate,
                                       16_000,
-                                      res_type='kaiser_fast')
+                                      res_type='polyphase'
+                                      )
+    
+    # truncate files longer than 240_000 = 15s (22 files in final_stt_2)
+    if(len(resampled_data) > 240_000):
+        print(f"Long file detected: length = {len(resampled_data)}")
+        resampled_data = resampled_data[:240_000]
     batch['data'] = resampled_data
+    batch['length'] = len(resampled_data)
     batch['sampling_rate'] = 16_000
     batch['target_text'] = batch['text']
     del resampled_data, data
@@ -135,7 +150,7 @@ def preprocess_dataset(batch, processor):
     batch["input_values"] = processor(
         batch["data"], sampling_rate=batch["sampling_rate"][0]).input_values
 
-    batch["length"] = [len(x) for x in batch["input_values"]]
+    # batch["length"] = [len(x) for x in batch["input_values"]]
 
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
@@ -146,21 +161,20 @@ def preprocess_dataset(batch, processor):
     return batch
 
 
-def prepare_dataset(file_list, df, processor, args, val_size=0.1):
+def prepare_dataset(file_list, df, processor, args, val_size=0.05):
     if args.mode == 'train':
         set_verbosity_error()  # disable logging
-
+        
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
         if args.split != None and args.max_split != None:
             length = int(len(df) / args.max_split)
             i = args.split
             df = df.iloc[i * length:(i + 1) * length, :]
-        # df['text_split'] = df['text'].apply(split_syllables)
-        # df = df.loc[:30000, :]
+        
         print(f"Number of soundfiles : {len(df)}")
-        # print(df.head())
-
+        # print(df["text"][:50])
+        # exit()
         train, val = train_test_split(df, test_size=val_size)
 
         train_data = Dataset.from_pandas(
@@ -186,21 +200,48 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
 
         # change data to array
         print("Start changing to array")
-
+        # sampler = torchaudio.transforms.Resample(48_000,16_000)
+        tic = time.perf_counter()
         train_data = train_data.map(
             map_to_array,
             remove_columns=train_data.column_names,
             num_proc=args.preprocessing_num_workers,
             with_indices=True,
+            # fn_kwargs={'sampler': sampler},
         )
         val_data = val_data.map(
             map_to_array,
             remove_columns=val_data.column_names,
             num_proc=args.preprocessing_num_workers,
             with_indices=True,
+            # fn_kwargs={'sampler': sampler},
         )
+        toc = time.perf_counter()
+        print(f"Changing to array done in {toc-tic:.1f}s")
+
+        # print("Filter long files")
+        # This is slow, but is the only way to drop rows(not truncate)
+        # tic = time.perf_counter()
+        # train_data = train_data.filter(
+        #     lambda length: [x < 240_000 for x in length],
+        #     input_columns='length',
+        #     num_proc=args.preprocessing_num_workers,
+        #     batched=True
+        # )
+        # val_data = val_data.filter(
+        #     lambda length: length < 240_000,
+        #     input_columns='length',
+        #     num_proc=args.preprocessing_num_workers,
+        #     batched=True
+        # )
+        # toc = time.perf_counter()
+        # print(f"Filter done in {toc-tic:.1f}s")
+        print("Size after filter")
+        print(f"train_Data : {len(train_data)}")
+        print(f"val_Data : {len(val_data)}")
 
         print("Start preprocess")
+        tic = time.perf_counter()
 
         train_data = train_data.map(
             preprocess_dataset,
@@ -218,7 +259,9 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1):
             writer_batch_size=args.writer_batch_size,
             batch_size=args.writer_batch_size
         )
-
+        toc = time.perf_counter()
+        print(f"Preprocess done in {toc-tic:.1f}s")
+       
         set_verbosity_info()
 
         return train_data, val_data

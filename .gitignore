@@ -139,3 +139,10 @@ cython_debug/
 
 
 .vscode/
+etc/
+hunspell/
+kowav-processor/
+train/
+*temp*/
+debug.sh
+spell

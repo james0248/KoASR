@@ -201,7 +201,10 @@ class DataTrainingArguments:
         default=1000,
         metadata={"help": "Disk and memory"},
     )
-
+    
+@dataclass
+class TrainingArguments(TrainingArguments):
+    pass
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -324,10 +327,12 @@ class CTCTrainer(Trainer):
 
         self.cur_step += 1
         # print(self.cur_step)
-        gc.collect()
-        torch.cuda.empty_cache()
-        # print(get_gpu_info())
+        # gc.collect()
+        # torch.cuda.empty_cache()
+        if self.cur_step<=3:
+            print(get_gpu_info())
         model.train()
+        
         inputs = self._prepare_inputs(inputs)
 
         if self.use_amp:
@@ -345,7 +350,6 @@ class CTCTrainer(Trainer):
                 raise ValueError(
                     f"{model.config.ctc_loss_reduction} is not valid. Choose one of ['mean', 'sum']"
                 )
-
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
 
@@ -492,7 +496,7 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
-
+    
     bind_model(model, training_args)
     if model_args.pause:
         nsml.paused(scope=locals())
@@ -506,6 +510,8 @@ if __name__ == "__main__":
         elif model_args.data_type == 2:
             # print("No pretrained model yet")
             nsml.load(checkpoint='0', session='nia1030/stt_2/79')
+        # nsml.save(0)
+        # exit()
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
