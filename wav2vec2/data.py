@@ -114,11 +114,18 @@ def map_to_array(batch, idx):
     try:
         data, sampling_rate = librosa.load(batch['path'], sr=None)
     except:
+        # Method 1
         with open(batch['path'], 'rb') as opened_pcm_file:
             buf = opened_pcm_file.read()
             pcm_data = np.frombuffer(buf, dtype = 'int16')
             data = librosa.util.buf_to_float(pcm_data, 2)
             sampling_rate = 16_000
+        
+        # Method 2
+        # data = np.memmap(batch['path'], dtype = 'h', mode = 'r').astype(np.float)
+        # sampling_rate = 16_000
+
+
     resampled_data = librosa.resample(data,
                                       sampling_rate,
                                       16_000,
@@ -126,7 +133,7 @@ def map_to_array(batch, idx):
                                       )
     
     # truncate files longer than 240_000 = 15s (22 files in final_stt_2)
-    if(len(resampled_data) > 240_000):
+    if(len(resampled_data) > 240_500):
         print(f"Long file detected: length = {len(resampled_data)}")
         resampled_data = resampled_data[:240_000]
     batch['data'] = resampled_data
@@ -190,7 +197,6 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
             split_and_remove_special_characters,
             num_proc=args.preprocessing_num_workers,
         )
-
         # first save this files to disk and reload
         train_data.save_to_disk('./train_temp')
         val_data.save_to_disk('./val_temp')

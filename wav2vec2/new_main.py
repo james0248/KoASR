@@ -512,6 +512,9 @@ if __name__ == "__main__":
             nsml.load(checkpoint='0', session='nia1030/stt_2/79')
         # nsml.save(0)
         # exit()
+        if model_args.data_type == 2:
+            label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
+
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
                                                      label,
