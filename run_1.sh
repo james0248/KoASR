@@ -11,7 +11,7 @@ nsml run -e ./wav2vec2/new_main.py -d final_stt_1 \
     --eval_steps 1000
     --save_strategy no
     --save_total_limit 2 
-    --learning_rate 5e-5
+    --learning_rate 1e-4
     --warmup_steps 1000 
     --attention_dropout 0.094
     --activation_dropout 0.055
@@ -31,4 +31,6 @@ nsml run -e ./wav2vec2/new_main.py -d final_stt_1 \
     --writer_batch_size 500
     --max_split 1
     --split 0
-    --data_type 2" 
+    --data_type 2
+    --disable_tqdm True
+    " 

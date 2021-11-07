@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datasets.search import NearestExamplesResults
 
 from hangul_utils import join_jamos
+import transformers
 from gpuinfo import get_gpu_info
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
@@ -506,10 +507,10 @@ if __name__ == "__main__":
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
-            nsml.load(checkpoint='0', session='nia1030/stt_2/87')
+            nsml.load(checkpoint='2', session='nia1030/final_stt_2/35')
         elif model_args.data_type == 2:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint='0', session='nia1030/stt_2/79')
+            print("No pretrained model yet")
+            #nsml.load(checkpoint='0', session='nia1030/stt_2/79')
         # nsml.save(0)
         # exit()
         if model_args.data_type == 2:
@@ -559,6 +560,14 @@ if __name__ == "__main__":
             eval_dataset=val_dataset,
             tokenizer=processor.feature_extractor,
             callbacks=[NSMLCallback],
+            optimizers=(transformers.AdamW(model.parameters(), lr=training_args.learning_rate), 
+                transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
+                    transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
+                    num_warmup_steps=training_args.warmup_steps,
+                    num_training_steps = training_args.num_train_epochs * len(train_dataset)//training_args.per_device_train_batch_size // training_args.gradient_accumulation_steps,
+                    num_cycles=training_args.num_train_epochs
+                )
+            )
         )
 
         print("Training start")
