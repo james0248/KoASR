@@ -70,6 +70,10 @@ def init_data():
         "ㄿ": 51,
         "ㅀ": 52,
         "ㅄ": 53,
+        "," : 54,
+        "?" : 55,
+        "." : 56,
+        "!" : 57
     }
     os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
@@ -103,7 +107,8 @@ def extract_all_chars(batch):
 
 
 def split_and_remove_special_characters(batch):
-    chars_to_ignore_regex = '[\,\?\.\!\-\;\:\"\“\%\‘\”]'
+    #chars_to_ignore_regex = '[\,\?\.\!\-\;\:\"\“\%\‘\”]'
+    chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
     batch["text"] = split_syllables(batch["text"])
     batch["text"] = re.sub(chars_to_ignore_regex, '',
                            batch["text"]).lower() + " "
@@ -157,12 +162,9 @@ def preprocess_dataset(batch, processor):
     batch["input_values"] = processor(
         batch["data"], sampling_rate=batch["sampling_rate"][0]).input_values
 
-    # batch["length"] = [len(x) for x in batch["input_values"]]
-
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
-    # print(batch["target_text"])
-    # print(batch["labels"])
+    
     del batch["target_text"], batch["data"], batch["sampling_rate"]
     gc.collect()
     return batch
@@ -206,21 +208,18 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
 
         # change data to array
         print("Start changing to array")
-        # sampler = torchaudio.transforms.Resample(48_000,16_000)
         tic = time.perf_counter()
         train_data = train_data.map(
             map_to_array,
             remove_columns=train_data.column_names,
             num_proc=args.preprocessing_num_workers,
             with_indices=True,
-            # fn_kwargs={'sampler': sampler},
         )
         val_data = val_data.map(
             map_to_array,
             remove_columns=val_data.column_names,
             num_proc=args.preprocessing_num_workers,
             with_indices=True,
-            # fn_kwargs={'sampler': sampler},
         )
         toc = time.perf_counter()
         print(f"Changing to array done in {toc-tic:.1f}s")

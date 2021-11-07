@@ -4,7 +4,7 @@ nsml run -e ./wav2vec2/new_main.py -d final_stt_1 \
     -c 8 -g 1 --memory 70G --shm-size 13G -a \
     "--output_dir ./wav2vec2-korean-1
     --model_name_or_path facebook/wav2vec2-large-xlsr-53 
-    --num_train_epochs 5
+    --num_train_epochs 6
     --per_device_train_batch_size 6
     --per_device_eval_batch_size 6
     --evaluation_strategy steps 
@@ -12,7 +12,7 @@ nsml run -e ./wav2vec2/new_main.py -d final_stt_1 \
     --save_strategy no
     --save_total_limit 2 
     --learning_rate 1e-4
-    --warmup_steps 1000 
+    --warmup_steps 500 
     --attention_dropout 0.094
     --activation_dropout 0.055
     --feat_proj_dropout 0.04
@@ -33,4 +33,5 @@ nsml run -e ./wav2vec2/new_main.py -d final_stt_1 \
     --split 0
     --data_type 2
     --disable_tqdm True
+    --logging_steps 10
     " 

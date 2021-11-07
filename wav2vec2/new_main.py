@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-from gc import callbacks
-import gc
 import logging
-import re
 from glob import glob
 import pickle
-import sys
 import os
 import shutil
 from dataclasses import dataclass, field
-from datasets.search import NearestExamplesResults
 
 from hangul_utils import join_jamos
 import transformers
@@ -22,7 +17,6 @@ import numpy as np
 import pandas as pd
 import torch
 from packaging import version
-from torch import nn
 from transformers.trainer_callback import TrainerControl, TrainerState
 
 from transformers import (HfArgumentParser, Trainer, TrainingArguments,
@@ -290,84 +284,26 @@ class NSMLCallback(TrainerCallback):
             'device': device,
         }
         nsml.save(int(state.epoch))
-        # print(state.epoch)
-        print(state.best_metric)
+        
     def on_evaluate(self, args: TrainingArguments, state: TrainerState,
                     control: TrainerControl, metrics, **kwargs):
-        # print(metrics)
-        nsml.report(step=state.epoch,
-                    cer=metrics["eval_cer"], wer=metrics["eval_wer"])
+        report_dict = {
+            'step' : state.epoch,
+            'loss@vector:val' : metrics['eval_loss'],
+            'metric@stack:wer' : metrics['eval_wer'],
+            'metric@stack:cer' : metrics['eval_cer'],
+        }
+        nsml.report(**report_dict)
 
+    def on_log(self, args: TrainingArguments, state: TrainerState,
+                    control: TrainerControl, logs=None, **kwargs):
+        if state.is_local_process_zero and 'loss' in logs:
+            report_dict = {
+                'step' : state.epoch,
+                'loss@vector:train' : logs['loss']
+            }
+            nsml.report(**report_dict)
 
-class CTCTrainer(Trainer):
-    def __init__(self, **kwargs):
-        super(CTCTrainer, self).__init__(**kwargs)
-        self.cur_step = 0
-        self.report_interval = 100
-
-    def training_step(
-            self, model: nn.Module,
-            inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
-        """
-        Perform a training step on a batch of inputs.
-
-        Subclass and override to inject custom behavior.
-
-        Args:
-            model (:obj:`nn.Module`):
-                The model to train.
-            inputs (:obj:`Dict[str, Union[torch.Tensor, Any]]`):
-                The inputs and targets of the model.
-
-                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
-                argument :obj:`labels`. Check your model's documentation for all accepted arguments.
-
-        Return:
-            :obj:`torch.Tensor`: The tensor with training loss on this batch.
-        """
-
-        self.cur_step += 1
-        # print(self.cur_step)
-        # gc.collect()
-        # torch.cuda.empty_cache()
-        if self.cur_step<=3:
-            print(get_gpu_info())
-        model.train()
-        
-        inputs = self._prepare_inputs(inputs)
-
-        if self.use_amp:
-            with autocast():
-                loss = self.compute_loss(model, inputs)
-        else:
-            loss = self.compute_loss(model, inputs)
-
-        if self.args.n_gpu > 1:
-            if model.module.config.ctc_loss_reduction == "mean":
-                loss = loss.mean()
-            elif model.module.config.ctc_loss_reduction == "sum":
-                loss = loss.sum() / (inputs["labels"] >= 0).sum()
-            else:
-                raise ValueError(
-                    f"{model.config.ctc_loss_reduction} is not valid. Choose one of ['mean', 'sum']"
-                )
-        if self.args.gradient_accumulation_steps > 1:
-            loss = loss / self.args.gradient_accumulation_steps
-
-        if self.use_amp:
-            self.scaler.scale(loss).backward()
-        elif self.use_apex:
-            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
-        elif self.deepspeed:
-            self.deepspeed.backward(loss)
-        else:
-            loss.backward()
-
-        if self.cur_step % self.report_interval == 0:
-            print(f'step: {self.cur_step}')
-            nsml.report(step=self.cur_step, batch_loss=loss.detach().item())
-        return loss.detach()
 
 
 def save_checkpoint(checkpoint, dir):
@@ -422,19 +358,16 @@ def bind_model(model, parser):
                 logits = model(input_values).logits
 
             pred_ids = torch.argmax(logits, dim=-1)
-            # print(pred_ids)
             pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
                                                processor)
-            punctuation = '.' if model_args.data_type == 1 else ''
             result_list.append(join_jamos(
-                processor.batch_decode(pred_ids)[0]) + punctuation)
+                processor.batch_decode(pred_ids)[0]))
 
             return None
 
         test_dataset.map(map_to_result)
 
         prob = [1] * len(result_list)
-        print(result_list[0])
 
         # DONOTCHANGE: They are reserved for nsml
         # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
@@ -474,7 +407,6 @@ if __name__ == "__main__":
                                      unk_token="[UNK]",
                                      pad_token="[PAD]",
                                      word_delimiter_token="|")
-    # tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
 
     feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1,
                                                  sampling_rate=16000,
@@ -506,8 +438,8 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint='2', session='nia1030/final_stt_2/35')
+            print("No pretrained model yet")
+            # nsml.load(checkpoint='5', session='nia1030/final_stt_2/39')
         elif model_args.data_type == 2:
             print("No pretrained model yet")
             #nsml.load(checkpoint='0', session='nia1030/stt_2/79')
@@ -551,7 +483,7 @@ if __name__ == "__main__":
         if model_args.freeze_feature_extractor:
             model.freeze_feature_extractor()
 
-        trainer = CTCTrainer(
+        trainer = Trainer(
             model=model,
             data_collator=data_collator,
             args=training_args,

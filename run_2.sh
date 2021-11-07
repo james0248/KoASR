@@ -33,4 +33,5 @@ nsml run -e ./wav2vec2/new_main.py -d final_stt_2 \
     --split 0
     --data_type 1
     --disable_tqdm True
+    --logging_steps 10
     " 
