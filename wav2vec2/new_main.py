@@ -290,8 +290,8 @@ class NSMLCallback(TrainerCallback):
         report_dict = {
             'step' : state.epoch,
             'loss@vector:val' : metrics['eval_loss'],
-            'metric@stack:wer' : metrics['eval_wer'],
-            'metric@stack:cer' : metrics['eval_cer'],
+            'metric@vector:wer' : metrics['eval_wer'],
+            'metric@vector:cer' : metrics['eval_cer'],
         }
         nsml.report(**report_dict)
 
