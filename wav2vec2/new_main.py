@@ -33,7 +33,7 @@ import warnings
 warnings.filterwarnings(action='ignore')
 
 if is_apex_available():
-    from apex import amp
+    from apex import amp # type: ignore
 
 if version.parse(torch.__version__) >= version.parse("1.6"):
     _is_native_amp_available = True
@@ -438,11 +438,11 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
-            print("No pretrained model yet")
-            # nsml.load(checkpoint='5', session='nia1030/final_stt_2/39')
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='5', session='nia1030/final_stt_2/44')
         elif model_args.data_type == 2:
-            print("No pretrained model yet")
-            #nsml.load(checkpoint='0', session='nia1030/stt_2/79')
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='5', session='nia1030/final_stt_1/22')
         # nsml.save(0)
         # exit()
         if model_args.data_type == 2:
@@ -496,7 +496,7 @@ if __name__ == "__main__":
                 transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
                     transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
                     num_warmup_steps=training_args.warmup_steps,
-                    num_training_steps = training_args.num_train_epochs * len(train_dataset)//training_args.per_device_train_batch_size // training_args.gradient_accumulation_steps,
+                    num_training_steps = training_args.num_train_epochs * (len(train_dataset)//training_args.per_device_train_batch_size // training_args.gradient_accumulation_steps // training_args.world_size),
                     num_cycles=training_args.num_train_epochs
                 )
             )
