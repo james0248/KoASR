@@ -1,202 +1,205 @@
-import argparse
-import os
-from glob import glob
-import gc
-import pickle
-from gpuinfo import get_gpu_info
-import pprint
+#!/usr/bin/env python3
 import logging
-
-import pandas as pd
-import numpy as np
-
+from glob import glob
+import pickle
+import os
+import shutil
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
 
-import torch
-from torch import nn
-from torch.utils.data import DataLoader
+from hangul_utils import join_jamos
+import transformers
+from gpuinfo import get_gpu_info
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import nsml
-from nsml import HAS_DATASET, DATASET_PATH
+import datasets
+import numpy as np
+import pandas as pd
+import torch
+from packaging import version
+from transformers.trainer_callback import TrainerControl, TrainerState
 
-from transformers.models.wav2vec2.tokenization_wav2vec2 import Wav2Vec2CTCTokenizer
-from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2Processor
-from transformers import AdamW, get_scheduler
-from datasets import load_metric
+from transformers import (HfArgumentParser, Trainer, TrainingArguments,
+                          Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
+                          Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
+                          trainer_utils, TrainerCallback, AutoTokenizer,
+                          AutoModelForPreTraining)
 
-from data import prepare_dataset
+from data import init_data, remove_duplicate_tokens, prepare_dataset
+from nsml import DATASET_PATH
 
+import warnings
 
-print('torch version: ', torch.__version__)
+warnings.filterwarnings(action='ignore')
 
+if is_apex_available():
+    from apex import amp # type: ignore
 
-def evaluate(model, batch):
-    '''
-    This function is called in submission
-    '''
-    model = model.to(device)
-    model.eval()
-    # Load processor from dictionary
-    processor = dict_for_infer['processor']
-
-    # input_values = processor(
-    #   batch["speech"],
-    #   sampling_rate=batch["sampling_rate"],
-    #   return_tensors="pt"
-    # ).input_values.to(device)
-    input_values = batch["input_values"]
-
-    with torch.no_grad():
-        logits = model(input_values).logits
-
-    pred_ids = torch.argmax(logits, dim=-1)
-    batch["pred_str"] = processor.batch_decode(pred_ids)
-    pred_str = batch["pred_str"]
-    return pred_str
+if version.parse(torch.__version__) >= version.parse("1.6"):
+    _is_native_amp_available = True
+    from torch.cuda.amp import autocast
 
 
-def train_step(batch_item, training):
-    '''
-    Assuming batch_item has two columns
-    input_values, labels
-    '''
-    batch = {k: v.to(device) for k, v in batch_item.items()}
-    if training is True:
-        model.train()
-        with torch.cuda.amp.autocast():
-            outputs = model(**batch)
-            loss = outputs.loss
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
-        return loss
+@dataclass
+class ModelArguments:
+    """
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
+    """
 
-    else:
-        model.eval()
-        with torch.no_grad():
-            outputs = model(**batch)
-            loss = outputs.loss
-        logits = outputs.logits
-        pred_ids = torch.argmax(logits, dim=-1)
-        pred_str = processor.batch_decode(pred_ids)
-        # acc is metric btw pred_ids, batch["labels"]
-        # TODO define metric
-        acc = 0
-        return loss, acc
-
-
-'''
-def loss_function(real, pred):
-    mask = torch.logical_not(torch.eq(real, 0))
-    loss_ = criterion(pred.permute(0, 2, 1), real)
-    mask = torch.tensor(mask, dtype=loss_.dtype)
-    loss_ = mask * loss_
-
-    return torch.sum(loss_) / torch.sum(mask)
-
-
-def accuracy_function(real, pred):
-    accuracies = torch.eq(real, torch.argmax(pred, dim=2))
-    mask = torch.logical_not(torch.eq(real, 0))
-    accuracies = torch.logical_and(mask, accuracies)
-    accuracies = torch.tensor(accuracies, dtype=torch.float32)
-    mask = torch.tensor(mask, dtype=torch.float32)
-
-    return torch.sum(accuracies) / torch.sum(mask)
-'''
-
-
-def path_loader(root_path, is_test=False):
-
-    if is_test:
-        file_list = sorted(glob(os.path.join(root_path, 'test_data', '*')))
-
-        return file_list
-
-    if args.mode == 'train':
-        train_path = os.path.join(root_path, 'train')
-        file_list = sorted(glob(os.path.join(train_path, 'train_data', '*')))
-        label = pd.read_csv(os.path.join(train_path, 'train_label'))
-
-    return file_list, label
-
-
-def save_checkpoint(checkpoint, dir):
-
-    torch.save(checkpoint, os.path.join(dir))
-
-
-def bind_model(model, parser):
-    # 학습한 모델을 저장하는 함수입니다.
-    def save(dir_name, *parser):
-        # directory
-        os.makedirs(dir_name, exist_ok=True)
-        save_dir = os.path.join(dir_name, 'checkpoint')
-        save_checkpoint(dict_for_infer, save_dir)
-
-        with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
-            pickle.dump(dict_for_infer, f)
-
-        print("저장 완료!")
-
-    # 저장한 모델을 불러올 수 있는 함수입니다.
-    def load(dir_name, *parser):
-
-        save_dir = os.path.join(dir_name, 'checkpoint')
-
-        global checkpoint
-        checkpoint = torch.load(save_dir)
-
-        model.load_state_dict(checkpoint['model'])
-
-        global dict_for_infer
-        with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
-            dict_for_infer = pickle.load(f)
-
-        print("로딩 완료!")
-
-    def infer(test_path, **kwparser):
-        device = checkpoint['device']
-        test_file_list = path_loader(test_path, is_test=True)
-
-        processor = dict_for_infer["processor"]
-        test_data = prepare_dataset(test_file_list, None, is_test=True)
-        test_data_loader = DataLoader(test_data, batch_size=64, shuffle=False)
-
-        result_list = []
-        for step, batch in enumerate(test_data_loader):
-            output = evaluate(model, batch)
-            result_list.extend(output)
-
-        prob = [1] * len(result_list)
-
-        # DONOTCHANGE: They are reserved for nsml
-        # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
-        # return list(zip(pred.flatten(), clipped.flatten()))
-        return list(zip(prob, result_list))
-
-    # DONOTCHANGE: They are reserved for nsml
-    # nsml에서 지정한 함수에 접근할 수 있도록 하는 함수입니다.
-    nsml.bind(save=save, load=load, infer=infer)
+    model_name_or_path: str = field(
+        metadata={
+            "help":
+            "Path to pretrained model or model identifier from huggingface.co/models"
+        },
+    )
+    cache_dir: Optional[str] = field(
+        default=None,
+        metadata={
+            "help":
+            "Where do you want to store the pretrained models downloaded from huggingface.co"
+        },
+    )
+    data_type: int = field(
+        default=None,
+        metadata={
+            "help":
+            "Select dataset"
+        },
+    )
+    attention_dropout: Optional[float] = field(
+        default=0.1, metadata={
+            "help": "The dropout ratio for the attention probabilities."
+        },
+    )
+    activation_dropout: Optional[float] = field(
+        default=0.1, metadata={
+            "help": "The dropout ratio for activations inside the fully connected layer."
+        },
+    )
+    hidden_dropout: Optional[float] = field(
+        default=0.1,
+        metadata={
+            "help": "The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler."
+        },
+    )
+    feat_proj_dropout: Optional[float] = field(
+        default=0.1,
+        metadata={
+            "help": "The dropout probabilitiy for all 1D convolutional layers in feature extractor."
+        },
+    )
+    mask_time_prob: Optional[float] = field(
+        default=0.05,
+        metadata={
+            "help": "Propability of each feature vector along the time axis to be chosen as the start of the vector"
+            "span to be masked. Approximately ``mask_time_prob * sequence_length // mask_time_length`` feature"
+            "vectors will be masked along the time axis. This is only relevant if ``apply_spec_augment is True``."
+        },
+    )
+    freeze_feature_extractor: Optional[bool] = field(
+        default=True,
+        metadata={
+            "help":
+            "Whether to freeze the feature extractor layers of the model."
+        })
+    gradient_checkpointing_: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help":
+            "If True, use gradient checkpointing to save memory at the expense of slower backward pass."
+        },
+    )
+    verbose_logging: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to log verbose messages or not."},
+    )
+    pause: Optional[int] = field(
+        default=0,
+        metadata={"help": "Whether to submit or not"},
+    )
+    layerdrop: Optional[float] = field(
+        default=0.0,
+        metadata={
+            "help": "The LayerDrop probability."
+        }
+    )
 
 
-def compute_metrics(pred):
-    wer_metric = load_metric("wer")
-    pred_logits = pred.predictions
-    pred_ids = np.argmax(pred_logits, axis=-1)
+@dataclass
+class DataTrainingArguments:
+    """
+    Arguments pertaining to what data we are going to input our model for training and eval.
 
-    pred.label_ids[pred.label_ids == -100] = processor.tokenizer.pad_token_id
+    Using `HfArgumentParser` we can turn this class
+    into argparse arguments to be able to specify them on
+    the command line.
+    """
 
-    pred_str = processor.batch_decode(pred_ids)
-    # we do not want to group tokens when computing the metrics
-    label_str = processor.batch_decode(pred.label_ids, group_tokens=False)
-
-    wer = wer_metric.compute(predictions=pred_str, references=label_str)
-
-    return {"wer": wer}
-
+    mode: Optional[str] = field(
+        default="train",
+        metadata={
+            "help": "Set mode for training or testing. Defaults to 'train'"
+        },
+    )
+    split: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Which split to use",
+        },
+    )
+    max_split: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Which split to use",
+        },
+    )
+    target_text_column: Optional[str] = field(
+        default="target_text",
+        metadata={
+            "help":
+            "Column in the dataset that contains label (target text). Defaults to 'text'"
+        },
+    )
+    speech_file_column: Optional[str] = field(
+        default="file",
+        metadata={
+            "help":
+            "Column in the dataset that contains speech file path. Defaults to 'file'"
+        },
+    )
+    target_feature_extractor_sampling_rate: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help":
+            "Resample loaded audio to target feature extractor's sampling rate or not."
+        },
+    )
+    max_duration_in_seconds: Optional[float] = field(
+        default=None,
+        metadata={
+            "help":
+            "Filters out examples longer than specified. Defaults to no filtering."
+        },
+    )
+    overwrite_cache: bool = field(
+        default=False,
+        metadata={
+            "help": "Overwrite the cached preprocessed datasets or not."
+        })
+    preprocessing_num_workers: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "The number of processes to use for the preprocessing."
+        },
+    )
+    writer_batch_size: Optional[int] = field(
+        default=1000,
+        metadata={"help": "Disk and memory"},
+    )
+    
+@dataclass
+class TrainingArguments(TrainingArguments):
+    pass
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -268,147 +271,244 @@ class DataCollatorCTCWithPadding:
         return batch
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='nia_test')
-    parser.add_argument('--mode', type=str, default='train')
-    parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--iteration', type=str, default='0')
-    parser.add_argument('--pause', type=int, default=0)
-    args = parser.parse_args()
+class NSMLCallback(TrainerCallback):
+    def on_epoch_end(self, args: TrainingArguments, state: TrainerState,
+                     control: TrainerControl, **kwargs):
+        global dict_for_infer
+        dict_for_infer = {
+            'model': model.state_dict(),
+            'epochs': state.epoch,
+            'learning_rate': args.learning_rate,
+            'tokenizer': tokenizer,
+            'processor': processor,
+            'device': device,
+        }
+        nsml.save(int(state.epoch))
+        
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState,
+                    control: TrainerControl, metrics, **kwargs):
+        report_dict = {
+            'step' : state.epoch,
+            'loss@vector:val' : metrics['eval_loss'],
+            'metric@vector:wer' : metrics['eval_wer'],
+            'metric@vector:cer' : metrics['eval_cer'],
+        }
+        nsml.report(**report_dict)
 
-    report_interval = 10
-    total_step = -1
+    def on_log(self, args: TrainingArguments, state: TrainerState,
+                    control: TrainerControl, logs=None, **kwargs):
+        if state.is_local_process_zero and 'loss' in logs:
+            report_dict = {
+                'step' : state.epoch,
+                'loss@vector:train' : logs['loss']
+            }
+            nsml.report(**report_dict)
 
-    epochs = args.epochs
 
-    learning_rate = 5e-5  # 5e-5
-    batch_size = 64
 
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
+def save_checkpoint(checkpoint, dir):
+    torch.save(checkpoint, os.path.join(dir))
 
-    logger.info(f"nsml report interval = {report_interval}")
 
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+def bind_model(model, parser):
+    # 학습한 모델을 저장하는 함수입니다.
+    def save(dir_name, *parser):
+        # directory
+        os.makedirs(dir_name, exist_ok=True)
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        save_checkpoint(dict_for_infer, save_dir)
+
+        with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
+            pickle.dump(dict_for_infer, f)
+
+        print("저장 완료!")
+
+    # 저장한 모델을 불러올 수 있는 함수입니다.
+    def load(dir_name, *parser):
+
+        save_dir = os.path.join(dir_name, 'checkpoint')
+
+        global checkpoint
+        checkpoint = torch.load(save_dir)
+
+        model.load_state_dict(checkpoint['model'])
+
+        global dict_for_infer
+        with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
+            dict_for_infer = pickle.load(f)
+
+        print("로딩 완료!")
+
+    def infer(test_path, **kwparser):
+        device = checkpoint['device']
+        test_file_list = path_loader(test_path)
+        test_dataset = prepare_dataset(test_file_list, None, processor,
+                                       data_args)
+        result_list = []
+
+        def map_to_result(batch):
+            model.to(device)
+
+            input_values = processor(
+                batch["data"],
+                sampling_rate=batch["sampling_rate"],
+                return_tensors="pt").input_values.to("cuda")
+
+            with torch.no_grad():
+                logits = model(input_values).logits
+
+            pred_ids = torch.argmax(logits, dim=-1)
+            pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
+                                               processor)
+            result_list.append(join_jamos(
+                processor.batch_decode(pred_ids)[0]))
+
+            return None
+
+        test_dataset.map(map_to_result)
+
+        prob = [1] * len(result_list)
+
+        # DONOTCHANGE: They are reserved for nsml
+        # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
+        # return list(zip(pred.flatten(), clipped.flatten()))
+        return list(zip(prob, result_list))
+
+    # DONOTCHANGE: They are reserved for nsml
+    # nsml에서 지정한 함수에 접근할 수 있도록 하는 함수입니다.
+    nsml.bind(save=save, load=load, infer=infer)
+
+
+def path_loader(root_path):
+    if data_args.mode == 'train':
+        train_path = os.path.join(root_path, 'train')
+        file_list = sorted(glob(os.path.join(train_path, 'train_data', '*')))
+        label = pd.read_csv(os.path.join(train_path, 'train_label'))
+
+        return file_list, label
+
+    else:
+        file_list = sorted(glob(os.path.join(root_path, 'test_data', '*')))
+
+        return file_list
+
+
+if __name__ == "__main__":
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments))
+
+    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    device = torch.device("cuda:0")
+
+    # For first time run
+    init_data()
+
+    tokenizer = Wav2Vec2CTCTokenizer('./kowav-processor/vocab.json',
+                                     unk_token="[UNK]",
+                                     pad_token="[PAD]",
+                                     word_delimiter_token="|")
+
+    feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1,
+                                                 sampling_rate=16000,
+                                                 padding_value=0.0,
+                                                 do_normalize=True,
+                                                 return_attention_mask=False)
+
+    processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
+                                  tokenizer=tokenizer)
 
     model = Wav2Vec2ForCTC.from_pretrained(
-        "fleek/wav2vec-large-xlsr-korean",
-        attention_dropout=0.1,
-        hidden_dropout=0.1,
-        feat_proj_dropout=0.0,
-        mask_time_prob=0.05,
-        layerdrop=0.1,
-        gradient_checkpointing_=True,
-        ctc_loss_reduction="mean",
-        pad_token_id=processor.tokenizer.pad_token_id,
-        vocab_size=len(processor.tokenizer)
+        model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        activation_dropout=model_args.activation_dropout,
+        attention_dropout=model_args.attention_dropout,
+        hidden_dropout=model_args.hidden_dropout,
+        feat_proj_dropout=model_args.feat_proj_dropout,
+        mask_time_prob=model_args.mask_time_prob,
+        gradient_checkpointing=model_args.gradient_checkpointing_,
+        layerdrop=model_args.layerdrop,
+        vocab_size=len(processor.tokenizer),
     )
-    # TODO NameError: name 'processor' is not defined ㅠㅠ
-
-    bind_model(model=model, parser=args)
-    if args.pause:
+    
+    bind_model(model, training_args)
+    if model_args.pause:
         nsml.paused(scope=locals())
 
-    if args.mode == 'train':
-        file_list, label = path_loader(DATASET_PATH)
+    file_list, label = path_loader(DATASET_PATH)
 
-        train_data, val_data = prepare_dataset(file_list, label)
-        logger.info(train_data[0])
+    if data_args.mode == 'train':
+        if model_args.data_type == 1:
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='5', session='nia1030/final_stt_2/44')
+        elif model_args.data_type == 2:
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='5', session='nia1030/final_stt_1/22')
+        # nsml.save(0)
+        # exit()
+        if model_args.data_type == 2:
+            label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
 
-        tokenizer = Wav2Vec2CTCTokenizer('./vocab.json',
-                                         unk_token="[UNK]",
-                                         pad_token="[PAD]",
-                                         word_delimiter_token="|")
+        print("Dataset preparation begin!")
+        train_dataset, val_dataset = prepare_dataset(file_list,
+                                                     label,
+                                                     processor,
+                                                     args=data_args)
+        print("Finished dataset preparation")
 
-        feature_extractor = Wav2Vec2FeatureExtractor(
-            feature_size=1,
-            sampling_rate=16000,
-            padding_value=0.0,
-            do_normalize=True,
-            return_attention_mask=False)
-
-        processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
-                                      tokenizer=tokenizer)
+        wer_metric = datasets.load_metric("wer")
+        cer_metric = datasets.load_metric("cer")
 
         data_collator = DataCollatorCTCWithPadding(processor=processor,
                                                    padding=True)
 
-        train_dataloader = DataLoader(
-            train_data, batch_size=batch_size, shuffle=True)
-        valid_dataloader = DataLoader(
-            val_data, batch_size=batch_size, shuffle=True)
+        def compute_metrics(pred):
+            pred_logits = pred.predictions
+            pred_ids = np.argmax(pred_logits, axis=-1)
 
-        logger.warning(
-            f"Number of batches : len(train) = {len(train_dataloader)}, len(valid) = {len(valid_dataloader)}")
+            pred.label_ids[pred.label_ids ==
+                           -100] = processor.tokenizer.pad_token_id
 
-        # load model from session checkpoint
-        #nsml.load(checkpoint='0', session='nia1030/stt_1/5')
+            pred_str = processor.batch_decode(pred_ids)
+            # we do not want to group tokens when computing the metrics
+            label_str = processor.batch_decode(pred.label_ids,
+                                               group_tokens=False)
+            print(f"pred : {[join_jamos(x) for x in pred_str[:5]]}")
+            print(f"label : {[join_jamos(x) for x in label_str[:5]]}")
+            wer = wer_metric.compute(predictions=pred_str,
+                                     references=label_str)
+            cer = cer_metric.compute(predictions=pred_str,
+                                     references=label_str)
+            return {"wer": wer, "cer": cer}
 
-        # Set optimizer, scheduler
-        optimizer = AdamW(model.parameters(), lr=learning_rate)
-        num_training_steps = args.epochs * len(train_dataloader)
-        lr_scheduler = get_scheduler(
-            "cosine",
-            optimizer=optimizer,
-            num_warmup_steps=0,
-            num_training_steps=num_training_steps
+        if model_args.freeze_feature_extractor:
+            model.freeze_feature_extractor()
+
+        trainer = Trainer(
+            model=model,
+            data_collator=data_collator,
+            args=training_args,
+            compute_metrics=compute_metrics,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            tokenizer=processor.feature_extractor,
+            callbacks=[NSMLCallback],
+            optimizers=(transformers.AdamW(model.parameters(), lr=training_args.learning_rate), 
+                transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
+                    transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
+                    num_warmup_steps=training_args.warmup_steps,
+                    num_training_steps = training_args.num_train_epochs * (len(train_dataset)//training_args.per_device_train_batch_size // training_args.gradient_accumulation_steps // training_args.world_size),
+                    num_cycles=training_args.num_train_epochs
+                )
+            )
         )
 
-        #criterion = nn.CrossEntropyLoss()
+        print("Training start")
+        trainer.train()
+        print("Training done!")
+        # clear disk
+        train_dataset.cleanup_cache_files()
+        val_dataset.cleanup_cache_files()
 
-        logger.warning("Training start")
-        model = model.to(device)
-
-        for epoch in range(args.epochs):
-            gc.collect()
-            total_train_loss, total_valid_loss = 0, 0
-            total_train_acc, total_valid_acc = 0, 0
-
-            training = True
-            for step, batch in enumerate(train_dataloader):
-                if(step == total_step):
-                    break
-                batch_loss = train_step(batch, training)
-                batch_loss = batch_loss.detach().item()
-                total_train_loss += batch_loss
-
-                if step == 0:
-                    pprint.pprint(get_gpu_info())
-                if step % report_interval == 0:
-                    nsml.report(step=step, batch_loss=batch_loss)
-                    logger.info(f"[{step}/{len(train_dataloader)}] \
-                     batch_loss = {batch_loss}")
-
-            training = False
-            for step, batch in enumerate(valid_dataloader):
-                batch_loss, batch_acc = train_step(batch, training)
-                total_valid_loss += batch_loss
-                total_valid_acc += batch_acc
-
-            logger.warning('=================loss=================')
-            logger.warning(f'total_train_loss: {total_train_loss}')
-            logger.warning(f'total_valid_loss: {total_valid_loss}')
-            logger.warning('\n')
-
-            logger.warning('=================acc=================')
-            logger.warning(f'total_train_acc : {total_train_acc}')
-            logger.warning(f'total_valid_acc : {total_valid_acc}')
-            logger.warning(
-                f'average_train_acc : {total_train_acc/len(train_dataloader)}')
-            logger.warning(
-                f'average_valid_acc : {total_valid_acc/len(valid_dataloader)}')
-            logger.warning('\n')
-
-            dict_for_infer = {
-
-                'model': model.state_dict(),
-                'processor': processor,
-                'epochs': epochs,
-                'learning_rate': learning_rate,
-                'tokenizer': tokenizer,
-                'device': device
-
-            }
-
-            # DONOTCHANGE (You can decide how often you want to save the model)
-            nsml.save(epoch)
+        shutil.rmtree('./train_temp')
+        shutil.rmtree('./val_temp')
+        print('Cleaning done!')

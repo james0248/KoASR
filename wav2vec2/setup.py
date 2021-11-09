@@ -7,7 +7,9 @@ setup(name='ladder_networks',
           'datasets==1.8.0',
           'transformers',
           'librosa',
+          'torchaudio',
           'jiwer',
           'hangul_utils',
           'apex',
+          'samplerate'
       ])
