@@ -14,6 +14,9 @@ from nsml import DATASET_PATH
 import os
 import time
 
+not_kor = {}
+
+
 def init_data():
     vocab = {
         "[PAD]": 0,
@@ -67,13 +70,12 @@ def init_data():
         "ㄼ": 48,
         "ㄽ": 49,
         "ㄾ": 50,
-        "ㄿ": 51,
         "ㅀ": 52,
         "ㅄ": 53,
-        "," : 54,
-        "?" : 55,
-        "." : 56,
-        "!" : 57
+        ",": 54,
+        "?": 55,
+        ".": 56,
+        "!": 57
     }
     os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
@@ -97,7 +99,7 @@ def decode_CTC(token_list, processor):
     clean_token_list = remove_duplicate_tokens(token_list, processor)
     raw_char_list = list(map(processor.convert, clean_token_list))
     joined_string = join_jamos(''.join(raw_char_list))
-    return list(joined_string)
+    return joined_string
 
 
 def extract_all_chars(batch):
@@ -107,11 +109,29 @@ def extract_all_chars(batch):
 
 
 def split_and_remove_special_characters(batch):
-    #chars_to_ignore_regex = '[\,\?\.\!\-\;\:\"\“\%\‘\”]'
-    chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
-    batch["text"] = split_syllables(batch["text"])
+    text_copy = batch["text"]
+    symbolic_words_regex = r'\([A-Z]*\:|\)'
+    for matches in re.findall(symbolic_words_regex, batch["text"]):
+        print(batch["text"])
+        not_kor[matches] = not_kor.get(matches, 0) + 1
+    batch["text"] = re.sub(symbolic_words_regex, '',
+                           batch["text"])
+
+    # chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
+    chars_to_ignore_regex = r'[\,\?\.\!\-\;\:\"\“\%\‘\”]'
+    for matches in re.findall(chars_to_ignore_regex, batch["text"]):
+        # print(batch["text"])
+        not_kor[matches] = not_kor.get(matches, 0) + 1
     batch["text"] = re.sub(chars_to_ignore_regex, '',
-                           batch["text"]).lower() + " "
+                           batch["text"])
+
+    for matches in re.findall(r'[a-zA-Z0-9]+', batch["text"]):
+        # print(f'Something wrong: {batch["text"]}')
+        # print(f'Original: {text_copy}')
+        not_kor[matches] = not_kor.get(matches, 0) + 1
+
+    batch["text"] = split_syllables(batch["text"])
+
     return batch
 
 
@@ -122,21 +142,20 @@ def map_to_array(batch, idx):
         # Method 1
         with open(batch['path'], 'rb') as opened_pcm_file:
             buf = opened_pcm_file.read()
-            pcm_data = np.frombuffer(buf, dtype = 'int16')
+            pcm_data = np.frombuffer(buf, dtype='int16')
             data = librosa.util.buf_to_float(pcm_data, 2)
             sampling_rate = 16_000
-        
+
         # Method 2
         # data = np.memmap(batch['path'], dtype = 'h', mode = 'r').astype(np.float)
         # sampling_rate = 16_000
-
 
     resampled_data = librosa.resample(data,
                                       sampling_rate,
                                       16_000,
                                       res_type='polyphase'
                                       )
-    
+
     # truncate files longer than 240_000 = 15s (22 files in final_stt_2)
     if(len(resampled_data) > 240_500):
         print(f"Long file detected: length = {len(resampled_data)}")
@@ -164,7 +183,7 @@ def preprocess_dataset(batch, processor):
 
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
-    
+
     del batch["target_text"], batch["data"], batch["sampling_rate"]
     gc.collect()
     return batch
@@ -173,14 +192,14 @@ def preprocess_dataset(batch, processor):
 def prepare_dataset(file_list, df, processor, args, val_size=0.05):
     if args.mode == 'train':
         set_verbosity_error()  # disable logging
-        
+
         df['path'] = df['file_name'].apply(
             lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
         if args.split != None and args.max_split != None:
             length = int(len(df) / args.max_split)
             i = args.split
             df = df.iloc[i * length:(i + 1) * length, :]
-        
+
         print(f"Number of soundfiles : {len(df)}")
         # print(df["text"][:50])
         # exit()
@@ -199,6 +218,9 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
             split_and_remove_special_characters,
             num_proc=args.preprocessing_num_workers,
         )
+        # print(not_kor)
+        # print(train_data[:10]['text'])
+
         # first save this files to disk and reload
         train_data.save_to_disk('./train_temp')
         val_data.save_to_disk('./val_temp')
@@ -266,7 +288,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
         )
         toc = time.perf_counter()
         print(f"Preprocess done in {toc-tic:.1f}s")
-       
+
         set_verbosity_info()
 
         return train_data, val_data
