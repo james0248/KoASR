@@ -312,16 +312,16 @@ def save_checkpoint(checkpoint, dir):
 
 import os
 from pathlib import Path
-def bind_dataset(folder):
+def bind_dataset(file):
     def save(dir_name, *parser):
         os.makedirs(dir_name, exist_ok=True)
         save_dir = os.path.join(dir_name, 'checkpoint')
         os.makedirs(save_dir, exist_ok=True)
-        os.system(f"cp -r {str(Path(folder))} {str(Path(save_dir) / (Path(folder).name))}")
+        os.system(f"cp {str(Path(file))} {str(Path(save_dir) / (Path(file).name))}")
         print("데이터 저장 완료!")
     def load(dir_name, *parser):
         save_dir = os.path.join(dir_name, 'checkpoint')
-        os.system(f"cp -r {str(Path(save_dir) / (Path(folder).name))} {str(Path(folder))}")
+        os.system(f"cp {str(Path(save_dir) / (Path(file).name))} {str(Path(file))}")
         print("데이터 로딩 완료!")
     nsml.bind(save=save,load=load)    
 
@@ -462,7 +462,7 @@ if __name__ == "__main__":
     # # nsml.save(0)
     # nsml.load(checkpoint = '0', session = 'nia1030/final_stt_1/61')
     # os.system("ls -l test")
-    bind_dataset("./data")
+    bind_dataset("./data.tar")
 
     from download import aihub_path_loader
     file_list, label = aihub_path_loader()

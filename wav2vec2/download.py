@@ -33,24 +33,26 @@ def download_aihub_file():
     Path('./temp').mkdir(exist_ok=True)
 
     for dataset in ['dialog_02','dialog_03','dialog_04','hobby_01']:
-        for key in ['label','data']:
-            id = id_dict[dataset][key]
-            output = Path('./temp/data.tar.gz')
-            # print(f"downloading {id} to {str(output)}")
-            try:
+        try:
+            for key in ['data','label']:
+                id = id_dict[dataset][key]
+                output = Path('./temp/data.tar.gz')
+                # print(f"downloading {id} to {str(output)}")
                 gdown.download(id = id, output = str(output), use_cookies= False)
                 os.system(f"ls -l {str(output.parent)}")
                 print(f"Start unzip .tar.gz")
                 os.system(f"tar -zxf {str(output)} -C {str(output.parent)}")
                 os.remove(str(output))
                 os.system(f"ls -l {str(output.parent)}")
-            except:
-                print("Error occured")
-                pass
+        except:
+            print("Error occured")
+            pass
     os.system(f"mv {str(output.parent/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data')} .")
     print("now remove everything")
     os.system(f"rm -rf {str(output.parent)}")
     print("done!")
+    print("zip file to save")
+    os.system(f"tar -cf data.tar data")
     # gdown.download_folder(url="https://drive.google.com/drive/folders/1P5hPyHEWRqUHtFkLnYZxE21usqlKxXsX", quiet=False, no_cookies = True)
 
 
@@ -75,12 +77,17 @@ def parse_label(path):
     return clean_df
 def aihub_path_loader():
     # Download only in the first session
-    # download_aihub_file()
-    # print("save to nsml...")
-    # nsml.save(1000)
-    print("Fetching dataset from checkpoint...")
-    nsml.load(checkpoint = '1000', session='nia1030/final_stt_1/65')
-
+    first_download = True
+    if first_download:
+        download_aihub_file()
+        print("save to nsml...")
+        nsml.save(1000)
+        os.remove("data.tar")
+    else:    
+        print("Fetching dataset from checkpoint...")
+        nsml.load(checkpoint = '1000', session='nia1030/final_stt_1/***')
+        os.system(f"tar -xf data.tar")
+        
     print("parse labels")
     label_path = Path('./data/1.Training/1.라벨링데이터/')
     df = pd.DataFrame(columns=['path','text'])
