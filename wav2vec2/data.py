@@ -193,8 +193,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
     if args.mode == 'train':
         set_verbosity_error()  # disable logging
 
-        df['path'] = df['file_name'].apply(
-            lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
+        
         if args.split != None and args.max_split != None:
             length = int(len(df) / args.max_split)
             i = args.split

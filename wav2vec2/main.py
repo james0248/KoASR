@@ -384,7 +384,8 @@ def path_loader(root_path):
         train_path = os.path.join(root_path, 'train')
         file_list = sorted(glob(os.path.join(train_path, 'train_data', '*')))
         label = pd.read_csv(os.path.join(train_path, 'train_label'))
-
+        label['path'] = label['file_name'].apply(
+            lambda row: os.path.join(DATASET_PATH, 'train', 'train_data', row))
         return file_list, label
 
     else:
@@ -434,19 +435,21 @@ if __name__ == "__main__":
     if model_args.pause:
         nsml.paused(scope=locals())
 
-    file_list, label = path_loader(DATASET_PATH)
+    # file_list, label = path_loader(DATASET_PATH)
 
+    from download import aihub_path_loader
+    file_list, label = aihub_path_loader()
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
             nsml.load(checkpoint='5', session='nia1030/final_stt_2/44')
         elif model_args.data_type == 2:
             # print("No pretrained model yet")
-            nsml.load(checkpoint='5', session='nia1030/final_stt_1/22')
+            nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')
         # nsml.save(0)
         # exit()
-        if model_args.data_type == 2:
-            label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
+        # if model_args.data_type == 2:
+        #     label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
 
         print("Dataset preparation begin!")
         train_dataset, val_dataset = prepare_dataset(file_list,
@@ -511,4 +514,5 @@ if __name__ == "__main__":
 
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
+        shutil.rmtree('./data')
         print('Cleaning done!')
