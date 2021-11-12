@@ -310,6 +310,24 @@ def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
 
 
+import os
+from pathlib import Path
+def bind_dataset(folder):
+    def save(dir_name, *parser):
+        os.makedirs(dir_name, exist_ok=True)
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        os.makedirs(save_dir, exist_ok=True)
+        os.system(f"cp -r {str(Path(folder))} {str(Path(save_dir) / (Path(folder).name))}")
+        print("데이터 저장 완료!")
+    def load(dir_name, *parser):
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        os.system(f"cp -r {str(Path(save_dir) / (Path(folder).name))} {str(Path(folder))}")
+        print("데이터 로딩 완료!")
+    nsml.bind(save=save,load=load)    
+
+
+
+
 def bind_model(model, parser):
     # 학습한 모델을 저장하는 함수입니다.
     def save(dir_name, *parser):
@@ -325,7 +343,7 @@ def bind_model(model, parser):
 
     # 저장한 모델을 불러올 수 있는 함수입니다.
     def load(dir_name, *parser):
-
+        print(f"called load {dir_name}")
         save_dir = os.path.join(dir_name, 'checkpoint')
 
         global checkpoint
@@ -434,11 +452,22 @@ if __name__ == "__main__":
     bind_model(model, training_args)
     if model_args.pause:
         nsml.paused(scope=locals())
-
     # file_list, label = path_loader(DATASET_PATH)
+    
+    
+    # os.system("mkdir test")
+    # os.system("touch test/text")
+    folder = "test"
+    bind_dataset(folder)
+    # nsml.save(0)
+    nsml.load(checkpoint = '0', session = 'nia1030/final_stt_1/61')
+    os.system("ls -l test")
 
+
+    bind_model(model, training_args)
+    exit()
     from download import aihub_path_loader
-    file_list, label = aihub_path_loader()
+    # file_list, label = aihub_path_loader()
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")

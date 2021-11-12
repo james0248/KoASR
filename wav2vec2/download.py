@@ -1,7 +1,10 @@
 import gdown
 import os
 from pathlib import Path
-def download_aihub_file():
+from gdown.download import download
+import nsml
+
+def download_aihub_file(data_path, output_path):
     id_dict = {
         'hobby_01' :{
             'label' : '1e63HuvqmXIJrGAV48Cl45PcNkk24N69u',
@@ -9,7 +12,8 @@ def download_aihub_file():
         },
         'dialog_01' :{
             'label' : '1eqpLDV4qAUIbudh-qzsGj95HwYcBV7B9',
-            'data' : '1zkV9W2Cww0nlapYvPcGqjPrmm7W0NyPx',
+            #'data' : '1zkV9W2Cww0nlapYvPcGqjPrmm7W0NyPx',
+            'data' : '14M5_CoAstn4bwGPh22jxTUOdVnje1XYZ'
         }
     }
     datadir = Path('./data')
@@ -17,7 +21,7 @@ def download_aihub_file():
     Path('./temp').mkdir(exist_ok=True)
     id = id_dict['hobby_01']['label']
     for dataset in id_dict.values():
-        for key in ['label','data']:
+        for key in ['label']:
             id = dataset[key]
             output = Path('./temp/data.tar.gz')
             # print(f"downloading {id} to {str(output)}")
@@ -55,7 +59,8 @@ def parse_label(path):
     print(len(clean_df))
     return clean_df
 def aihub_path_loader():
-    download_aihub_file()
+    nsml.cache(download_aihub_file, data_path='aihub',output_path='./data')
+    # download_aihub_file()
     label_path = Path('./data/1.Training/1.라벨링데이터/')
     df = pd.DataFrame(columns=['path','text'])
     for subject in label_path.iterdir():
