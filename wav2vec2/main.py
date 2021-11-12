@@ -455,19 +455,19 @@ if __name__ == "__main__":
     # file_list, label = path_loader(DATASET_PATH)
     
     
-    # os.system("mkdir test")
-    # os.system("touch test/text")
-    folder = "test"
-    bind_dataset(folder)
-    # nsml.save(0)
-    nsml.load(checkpoint = '0', session = 'nia1030/final_stt_1/61')
-    os.system("ls -l test")
+    # # os.system("mkdir test")
+    # # os.system("touch test/text")
+    # folder = "test"
+    # bind_dataset(folder)
+    # # nsml.save(0)
+    # nsml.load(checkpoint = '0', session = 'nia1030/final_stt_1/61')
+    # os.system("ls -l test")
+    bind_dataset("./data")
 
+    from download import aihub_path_loader
+    file_list, label = aihub_path_loader()
 
     bind_model(model, training_args)
-    exit()
-    from download import aihub_path_loader
-    # file_list, label = aihub_path_loader()
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
