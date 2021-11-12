@@ -74,10 +74,13 @@ def parse_label(path):
     print(len(clean_df))
     return clean_df
 def aihub_path_loader():
-    # nsml.cache(download_aihub_file, data_path='aihub',output_path='./data')
-    download_aihub_file()
-    print("save to nsml...")
-    nsml.save(1000)
+    # Download only in the first session
+    # download_aihub_file()
+    # print("save to nsml...")
+    # nsml.save(1000)
+    print("Fetching dataset from checkpoint...")
+    nsml.load(checkpoint = '1000', session='nia1030/final_stt_1/65')
+
     print("parse labels")
     label_path = Path('./data/1.Training/1.라벨링데이터/')
     df = pd.DataFrame(columns=['path','text'])
