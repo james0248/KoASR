@@ -289,9 +289,9 @@ class NSMLCallback(TrainerCallback):
                     control: TrainerControl, metrics, **kwargs):
         report_dict = {
             'step' : state.epoch,
-            'loss@vector:val' : metrics['eval_loss'],
-            'metric@vector:wer' : metrics['eval_wer'],
-            'metric@vector:cer' : metrics['eval_cer'],
+            'eval_loss' : metrics['eval_loss'],
+            'wer' : metrics['eval_wer'],
+            'cer' : metrics['eval_cer'],
         }
         nsml.report(**report_dict)
 
@@ -300,7 +300,7 @@ class NSMLCallback(TrainerCallback):
         if state.is_local_process_zero and 'loss' in logs:
             report_dict = {
                 'step' : state.epoch,
-                'loss@vector:train' : logs['loss']
+                'train_loss' : logs['loss']
             }
             nsml.report(**report_dict)
 
@@ -310,20 +310,7 @@ def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
 
 
-import os
-from pathlib import Path
-def bind_dataset(file):
-    def save(dir_name, *parser):
-        os.makedirs(dir_name, exist_ok=True)
-        save_dir = os.path.join(dir_name, 'checkpoint')
-        os.makedirs(save_dir, exist_ok=True)
-        os.system(f"cp {str(Path(file))} {str(Path(save_dir) / (Path(file).name))}")
-        print("데이터 저장 완료!")
-    def load(dir_name, *parser):
-        save_dir = os.path.join(dir_name, 'checkpoint')
-        os.system(f"cp {str(Path(save_dir) / (Path(file).name))} {str(Path(file))}")
-        print("데이터 로딩 완료!")
-    nsml.bind(save=save,load=load)    
+
 
 
 
@@ -454,19 +441,10 @@ if __name__ == "__main__":
         nsml.paused(scope=locals())
     # file_list, label = path_loader(DATASET_PATH)
     
-    
-    # # os.system("mkdir test")
-    # # os.system("touch test/text")
-    # folder = "test"
-    # bind_dataset(folder)
-    # # nsml.save(0)
-    # nsml.load(checkpoint = '0', session = 'nia1030/final_stt_1/61')
-    # os.system("ls -l test")
-    bind_dataset("./data.tar")
 
     from download import aihub_path_loader
     file_list, label = aihub_path_loader()
-
+    # bind to model again
     bind_model(model, training_args)
     if data_args.mode == 'train':
         if model_args.data_type == 1:
@@ -535,7 +513,11 @@ if __name__ == "__main__":
         )
 
         print("Training start")
-        trainer.train()
+        try:
+            trainer.train()
+        except:
+            print('error occured')
+            pass
         print("Training done!")
         # clear disk
         train_dataset.cleanup_cache_files()

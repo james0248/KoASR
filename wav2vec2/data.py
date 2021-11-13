@@ -110,31 +110,11 @@ def extract_all_chars(batch):
 
 
 def split_and_remove_special_characters(batch):
-    text_copy = batch["text"]
-    symbolic_words_regex = r'\([A-Z]*\:|\)'
-    for matches in re.findall(symbolic_words_regex, batch["text"]):
-        print(batch["text"])
-        not_kor[matches] = not_kor.get(matches, 0) + 1
-    batch["text"] = re.sub(symbolic_words_regex, '',
-                           batch["text"])
-
-    # chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
-    chars_to_ignore_regex = r'[\,\?\.\!\-\;\:\"\“\%\‘\”]'
-    for matches in re.findall(chars_to_ignore_regex, batch["text"]):
-        # print(batch["text"])
-        not_kor[matches] = not_kor.get(matches, 0) + 1
-    batch["text"] = re.sub(chars_to_ignore_regex, '',
-                           batch["text"])
-
-    for matches in re.findall(r'[a-zA-Z0-9]+', batch["text"]):
-        # print(f'Something wrong: {batch["text"]}')
-        # print(f'Original: {text_copy}')
-        not_kor[matches] = not_kor.get(matches, 0) + 1
-
+    chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
     batch["text"] = split_syllables(batch["text"])
-
+    batch["text"] = re.sub(chars_to_ignore_regex, '',
+                           batch["text"]).lower() + " "
     return batch
-
 
 def map_to_array(batch, idx):
     try:

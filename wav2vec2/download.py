@@ -4,6 +4,21 @@ from pathlib import Path
 from gdown.download import download
 import nsml
 
+import os
+from pathlib import Path
+def bind_dataset(file):
+    def save(dir_name, *parser):
+        os.makedirs(dir_name, exist_ok=True)
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        os.makedirs(save_dir, exist_ok=True)
+        os.system(f"cp {str(Path(file))} {str(Path(save_dir) / (Path(file).name))}")
+        print("데이터 저장 완료!")
+    def load(dir_name, *parser):
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        os.system(f"cp {str(Path(save_dir) / (Path(file).name))} {str(Path(file))}")
+        print("데이터 로딩 완료!")
+    nsml.bind(save=save,load=load)    
+
 def download_aihub_file():
     id_dict = {
         'hobby_01' :{
@@ -28,32 +43,66 @@ def download_aihub_file():
             'data' : '1FJ4c9b-G0dMNGSGjOk8Mkip34gLtlIPG',
         }
     }
+
+
+    '''
+    -data
+    
+    -gdown
+        -A.tar.gz
+        -B.tar.gz...
+
+    -extract
+        -data
+            -remote ....
+    -data.tar -> for save
+    '''
+
     datadir = Path('./data')
     datadir.mkdir(exist_ok=True)
-    Path('./temp').mkdir(exist_ok=True)
+    download_dir = Path('./gdown')
+    download_dir.mkdir(exist_ok=True)
+    extract_dir = Path('./extract')
+    extract_dir.mkdir(exist_ok=True)
+    #up to 50files
+    #folder containes ~220GB
+    gdown.download_folder(id = "10DYHdoizNokrb6WIIi-d0o7xILgFe2NH", quiet=False, use_cookies = False, output = './gdown')
+    print(f"ls -l {str(download_dir)}")
+    os.system(f"ls -l {str(download_dir)}")
+    i=0
+    for gzfile in download_dir.iterdir():
+        print(f"checkpoint {100+i} binding to {str(gzfile)}")
+        bind_dataset(str(gzfile))
+        nsml.save(100+i)
+        i+=1
+    for gzfile in download_dir.iterdir():
+        print(f"tar -zxf {str(gzfile)} -C {str(extract_dir)}")
+        os.system(f"tar -zxf {str(gzfile)} -C {str(extract_dir)}")
+    print(f"mv {str(extract_dir/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data')} .")
+    os.system(f"mv {str(extract_dir/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data')} .")
 
-    for dataset in ['dialog_02','dialog_03','dialog_04','hobby_01']:
-        try:
-            for key in ['data','label']:
-                id = id_dict[dataset][key]
-                output = Path('./temp/data.tar.gz')
-                # print(f"downloading {id} to {str(output)}")
-                gdown.download(id = id, output = str(output), use_cookies= False)
-                os.system(f"ls -l {str(output.parent)}")
-                print(f"Start unzip .tar.gz")
-                os.system(f"tar -zxf {str(output)} -C {str(output.parent)}")
-                os.remove(str(output))
-                os.system(f"ls -l {str(output.parent)}")
-        except:
-            print("Error occured")
-            pass
-    os.system(f"mv {str(output.parent/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data')} .")
+
+    # for dataset in ['dialog_02','dialog_03','dialog_04','hobby_01']:
+    #     try:
+    #         for key in ['label']:
+    #             id = id_dict[dataset][key]
+    #             output = Path('./gdown/data.tar.gz')
+    #             # print(f"downloading {id} to {str(output)}")
+    #             gdown.download(id = id, output = str(output), use_cookies= False)
+    #             os.system(f"ls -l {str(output.parent)}")
+    #             print(f"Start unzip .tar.gz")
+    #             os.system(f"tar -zxf {str(output)} -C {str(output.parent)}")
+    #             os.remove(str(output))
+    #             os.system(f"ls -l {str(output.parent)}")
+    #     except:
+    #         print("Error occured")
+    #         pass
+    # os.system(f"mv {str(output.parent/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data')} .")
     print("now remove everything")
-    os.system(f"rm -rf {str(output.parent)}")
+    os.system(f"rm -rf {str(download_dir)}")
     print("done!")
-    print("zip file to save")
+    print("tar file to save")
     os.system(f"tar -cf data.tar data")
-    # gdown.download_folder(url="https://drive.google.com/drive/folders/1P5hPyHEWRqUHtFkLnYZxE21usqlKxXsX", quiet=False, no_cookies = True)
 
 
 import pandas as pd
@@ -69,7 +118,10 @@ def parse_label(path):
     df[['path', 'raw_text']] = df['raw'].str.split(' :: ', expand = True)
     
     df['text'] = df['raw_text'].map(clean_label)
-    df['bad'] = df['text'].map(lambda x: len(re.findall("[^(ㄱ-ㅎ|ㅏ-ㅣ|가-힣|.?! )]",x))>0 or len(x)<10 or len(x)>50)
+    df['bad'] = df['text'].map(
+        lambda x: len(x)-len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣|.?! ]",x))>0 \
+            or len(x)<10 or len(x)>50 or len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]"),x)==0
+    )
     # print(df['bad'].sum())
     # print(df[df['bad']]['text'][:5])
     clean_df = df[df['bad']==False][['path','text']]
@@ -77,15 +129,20 @@ def parse_label(path):
     return clean_df
 def aihub_path_loader():
     # Download only in the first session
-    first_download = True
+    bind_dataset("./data.tar")
+
+    first_download = False
     if first_download:
         download_aihub_file()
-        print("save to nsml...")
+        print("save to nsml checkpoint 1000...")
+        bind_dataset("./data.tar")
         nsml.save(1000)
         os.remove("data.tar")
+        print("save complete! now you can safely exit this session")
     else:    
         print("Fetching dataset from checkpoint...")
-        nsml.load(checkpoint = '1000', session='nia1030/final_stt_1/***')
+        bind_dataset("./data.tar")
+        nsml.load(checkpoint = '1000', session='nia1030/final_stt_1/**')
         os.system(f"tar -xf data.tar")
         
     print("parse labels")
