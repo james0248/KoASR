@@ -448,7 +448,9 @@ if __name__ == "__main__":
     tokenizer = Wav2Vec2CTCTokenizer('./kowav-processor/vocab.json',
                                      unk_token="[UNK]",
                                      pad_token="[PAD]",
-                                     word_delimiter_token="|")
+                                     word_delimiter_token="|",
+                                     bos_token="[SOS]",
+                                     eos_token="[EOS]")
 
     feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1,
                                                  sampling_rate=16000,
