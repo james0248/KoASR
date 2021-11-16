@@ -27,12 +27,10 @@ from transformers import (HfArgumentParser, Trainer, TrainingArguments,
                           AutoModelForPreTraining)
 
 from data import init_data, remove_duplicate_tokens, prepare_dataset
-from download import DatasetWrapper
+from download import DatasetWrapper, bind_dataset, save_external_data
 from nsml import DATASET_PATH
 
 import warnings
-
-from wav2vec2.download import bind_dataset, save_external_data
 
 warnings.filterwarnings(action='ignore')
 
@@ -174,6 +172,13 @@ class DataTrainingArguments:
         metadata={
             "help":
             "Column in the dataset that contains label (target text). Defaults to 'text'"
+        },
+    )
+    gdrive_code: Optional[str] = field(
+        default="",
+        metadata={
+            "help":
+            "code for gdrive access"
         },
     )
     speech_file_column: Optional[str] = field(
@@ -435,7 +440,14 @@ if __name__ == "__main__":
     processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                   tokenizer=tokenizer)
 
-    model = Wav2Vec2ForCTC.from_pretrained(
+    if data_args.load_external_data:
+        save_external_data(processor, args=data_args)
+        shutil.rmtree('./train_temp')
+        shutil.rmtree('./val_temp')
+        print('Cleaning done!')
+        exit(0)
+
+    model = AutoModelForPreTraining.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         activation_dropout=model_args.activation_dropout,
@@ -452,12 +464,6 @@ if __name__ == "__main__":
     if model_args.pause:
         nsml.paused(scope=locals())
 
-    if data_args.load_external_data:
-        save_external_data(processor, args=data_args)
-        exit(0)
-
-        # bind to model again
-    bind_model(model, training_args)
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
@@ -479,9 +485,9 @@ if __name__ == "__main__":
             val_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
             bind_dataset(train_dataset_wrapper, val_dataset_wrapper)
             print("Loading saved external data...")
-            nsml.load(checkpoint='1000', session='nia1030/final_stt_1/**')
-            train_dataset = train_dataset_wrapper.get_dataset()
-            val_dataset = val_dataset_wrapper.get_dataset()
+            nsml.load(checkpoint='1000', session='nia1030/final_stt_1/122')
+            train_dataset = train_dataset_wrapper.dataset
+            val_dataset = val_dataset_wrapper.dataset
 
         else:
             file_list, label = path_loader(DATASET_PATH)
@@ -491,6 +497,8 @@ if __name__ == "__main__":
                                                          processor,
                                                          args=data_args)
         print("Finished dataset preparation")
+
+        print(train_dataset[0])
 
         wer_metric = datasets.load_metric("wer")
         cer_metric = datasets.load_metric("cer")
@@ -555,5 +563,4 @@ if __name__ == "__main__":
 
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
-        shutil.rmtree('./data')
         print('Cleaning done!')
