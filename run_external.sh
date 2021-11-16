@@ -1,9 +1,9 @@
 #! /bin/bash
-sleep 0m # Be patient!
+sleep 0 # Be patient!
 nsml run -e ./wav2vec2/main.py -d final_stt_1 \
-    -c 14 -g 1 --memory 140G --shm-size 13G -a \
+    -c 16 -g 1 --memory 164G --shm-size 2G -a \
     "--output_dir ./wav2vec2-korean-1
-    --model_name_or_path facebook/wav2vec2-large-xlsr-53 
+    --model_name_or_path facebook/wav2vec2-large-xlsr-53
     --num_train_epochs 10
     --per_device_train_batch_size 6
     --per_device_eval_batch_size 6
@@ -20,7 +20,7 @@ nsml run -e ./wav2vec2/main.py -d final_stt_1 \
     --layerdrop 0.041
     --mask_time_prob 0.082
     --fp16 True 
-    --preprocessing_num_workers 14
+    --preprocessing_num_workers 16
     --dataloader_num_workers 8
     --group_by_length True
     --length_column_name length
@@ -34,4 +34,7 @@ nsml run -e ./wav2vec2/main.py -d final_stt_1 \
     --data_type 2
     --disable_tqdm True
     --logging_steps 10
+    --load_external_data True
+    --use_external_data False
+    --gdrive_code 4/0AX4XfWjKnzik0EzFiAvBHNyGeVtq8ou80Qe32KDh1xqRvPtpuOJ1wXib52nonUBgBju_Yg
     " 

@@ -70,6 +70,7 @@ def init_data():
         "ㄼ": 48,
         "ㄽ": 49,
         "ㄾ": 50,
+        'ㄿ': 51,
         "ㅀ": 52,
         "ㅄ": 53,
         ",": 54,
@@ -102,6 +103,7 @@ def decode_CTC(token_list, processor):
     return joined_string
 
 
+# Currently not in use
 def extract_all_chars(batch):
     all_text = " ".join(batch["text"])
     vocab = list(set(all_text))
@@ -109,29 +111,10 @@ def extract_all_chars(batch):
 
 
 def split_and_remove_special_characters(batch):
-    text_copy = batch["text"]
-    symbolic_words_regex = r'\([A-Z]*\:|\)'
-    for matches in re.findall(symbolic_words_regex, batch["text"]):
-        print(batch["text"])
-        not_kor[matches] = not_kor.get(matches, 0) + 1
-    batch["text"] = re.sub(symbolic_words_regex, '',
-                           batch["text"])
-
-    # chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
-    chars_to_ignore_regex = r'[\,\?\.\!\-\;\:\"\“\%\‘\”]'
-    for matches in re.findall(chars_to_ignore_regex, batch["text"]):
-        # print(batch["text"])
-        not_kor[matches] = not_kor.get(matches, 0) + 1
-    batch["text"] = re.sub(chars_to_ignore_regex, '',
-                           batch["text"])
-
-    for matches in re.findall(r'[a-zA-Z0-9]+', batch["text"]):
-        # print(f'Something wrong: {batch["text"]}')
-        # print(f'Original: {text_copy}')
-        not_kor[matches] = not_kor.get(matches, 0) + 1
-
+    chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
     batch["text"] = split_syllables(batch["text"])
-
+    batch["text"] = re.sub(chars_to_ignore_regex, '',
+                           batch["text"]).lower() + " "
     return batch
 
 
@@ -189,11 +172,12 @@ def preprocess_dataset(batch, processor):
     return batch
 
 
-def prepare_dataset(file_list, df, processor, args, val_size=0.05):
+def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
     if args.mode == 'train':
+
         set_verbosity_error()  # disable logging
 
-        
+        # Used for fast training (Only use some of the data)
         if args.split != None and args.max_split != None:
             length = int(len(df) / args.max_split)
             i = args.split
@@ -202,12 +186,30 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
         print(f"Number of soundfiles : {len(df)}")
         # print(df["text"][:50])
         # exit()
-        train, val = train_test_split(df, test_size=val_size)
 
-        train_data = Dataset.from_pandas(
-            train)  # THESE HAD TO BE USED VERY CAREFULLY.
-        val_data = Dataset.from_pandas(
-            val)  # IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
+        # Initialize datasets
+        train_data = Dataset.from_dict({})
+        val_data = Dataset.from_dict({})
+
+        if args.load_external_data:
+            train_data = Dataset.from_pandas(
+                df)  # THESE HAD TO BE USED VERY CAREFULLY.
+            val_data = Dataset.from_pandas(
+                val_df)  # IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
+        else:
+            train, val = train_test_split(df, test_size=val_size)
+
+            train_data = Dataset.from_pandas(
+                train)  # THESE HAD TO BE USED VERY CAREFULLY.
+            val_data = Dataset.from_pandas(
+                val)  # IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
+
+        # first save this files to disk and reload
+        train_data.save_to_disk('./train_temp')
+        val_data.save_to_disk('./val_temp')
+
+        train_data = load_from_disk('./train_temp')
+        val_data = load_from_disk('./val_temp')
 
         train_data = train_data.map(
             split_and_remove_special_characters,
@@ -219,13 +221,6 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.05):
         )
         # print(not_kor)
         # print(train_data[:10]['text'])
-
-        # first save this files to disk and reload
-        train_data.save_to_disk('./train_temp')
-        val_data.save_to_disk('./val_temp')
-
-        train_data = load_from_disk('./train_temp')
-        val_data = load_from_disk('./val_temp')
 
         # change data to array
         print("Start changing to array")

@@ -5,6 +5,7 @@ import pickle
 import os
 import shutil
 from dataclasses import dataclass, field
+from datasets.arrow_dataset import Dataset
 
 from hangul_utils import join_jamos
 import transformers
@@ -26,6 +27,7 @@ from transformers import (HfArgumentParser, Trainer, TrainingArguments,
                           AutoModelForPreTraining)
 
 from data import init_data, remove_duplicate_tokens, prepare_dataset
+from download import DatasetWrapper, bind_dataset, save_external_data
 from nsml import DATASET_PATH
 
 import warnings
@@ -33,7 +35,7 @@ import warnings
 warnings.filterwarnings(action='ignore')
 
 if is_apex_available():
-    from apex import amp # type: ignore
+    from apex import amp  # type: ignore
 
 if version.parse(torch.__version__) >= version.parse("1.6"):
     _is_native_amp_available = True
@@ -153,11 +155,30 @@ class DataTrainingArguments:
             "help": "Which split to use",
         },
     )
+    load_external_data: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Whether to load external data from Google drive",
+        },
+    )
+    use_external_data: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Whether to use external data for training",
+        },
+    )
     target_text_column: Optional[str] = field(
         default="target_text",
         metadata={
             "help":
             "Column in the dataset that contains label (target text). Defaults to 'text'"
+        },
+    )
+    gdrive_code: Optional[str] = field(
+        default="",
+        metadata={
+            "help":
+            "code for gdrive access"
         },
     )
     speech_file_column: Optional[str] = field(
@@ -196,10 +217,12 @@ class DataTrainingArguments:
         default=1000,
         metadata={"help": "Disk and memory"},
     )
-    
+
+
 @dataclass
 class TrainingArguments(TrainingArguments):
     pass
+
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -284,26 +307,25 @@ class NSMLCallback(TrainerCallback):
             'device': device,
         }
         nsml.save(int(state.epoch))
-        
+
     def on_evaluate(self, args: TrainingArguments, state: TrainerState,
                     control: TrainerControl, metrics, **kwargs):
         report_dict = {
-            'step' : state.epoch,
-            'loss@vector:val' : metrics['eval_loss'],
-            'metric@vector:wer' : metrics['eval_wer'],
-            'metric@vector:cer' : metrics['eval_cer'],
+            'step': state.epoch,
+            'eval_loss': metrics['eval_loss'],
+            'wer': metrics['eval_wer'],
+            'cer': metrics['eval_cer'],
         }
         nsml.report(**report_dict)
 
     def on_log(self, args: TrainingArguments, state: TrainerState,
-                    control: TrainerControl, logs=None, **kwargs):
+               control: TrainerControl, logs=None, **kwargs):
         if state.is_local_process_zero and 'loss' in logs:
             report_dict = {
-                'step' : state.epoch,
-                'loss@vector:train' : logs['loss']
+                'step': state.epoch,
+                'train_loss': logs['loss']
             }
             nsml.report(**report_dict)
-
 
 
 def save_checkpoint(checkpoint, dir):
@@ -325,7 +347,7 @@ def bind_model(model, parser):
 
     # 저장한 모델을 불러올 수 있는 함수입니다.
     def load(dir_name, *parser):
-
+        print(f"called load {dir_name}")
         save_dir = os.path.join(dir_name, 'checkpoint')
 
         global checkpoint
@@ -418,7 +440,14 @@ if __name__ == "__main__":
     processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                   tokenizer=tokenizer)
 
-    model = Wav2Vec2ForCTC.from_pretrained(
+    if data_args.load_external_data:
+        save_external_data(processor, args=data_args)
+        shutil.rmtree('./train_temp')
+        shutil.rmtree('./val_temp')
+        print('Cleaning done!')
+        exit(0)
+
+    model = AutoModelForPreTraining.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         activation_dropout=model_args.activation_dropout,
@@ -430,15 +459,11 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
-    
+
     bind_model(model, training_args)
     if model_args.pause:
         nsml.paused(scope=locals())
 
-    # file_list, label = path_loader(DATASET_PATH)
-
-    from download import aihub_path_loader
-    file_list, label = aihub_path_loader()
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
@@ -452,11 +477,28 @@ if __name__ == "__main__":
         #     label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
 
         print("Dataset preparation begin!")
-        train_dataset, val_dataset = prepare_dataset(file_list,
-                                                     label,
-                                                     processor,
-                                                     args=data_args)
+        train_dataset = Dataset.from_dict({})
+        val_dataset = Dataset.from_dict({})
+
+        if data_args.use_external_data:
+            train_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
+            val_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
+            bind_dataset(train_dataset_wrapper, val_dataset_wrapper)
+            print("Loading saved external data...")
+            nsml.load(checkpoint='1000', session='nia1030/final_stt_1/122')
+            train_dataset = train_dataset_wrapper.dataset
+            val_dataset = val_dataset_wrapper.dataset
+
+        else:
+            file_list, label = path_loader(DATASET_PATH)
+            print("Loading competition data...")
+            train_dataset, val_dataset = prepare_dataset(file_list,
+                                                         label,
+                                                         processor,
+                                                         args=data_args)
         print("Finished dataset preparation")
+
+        print(train_dataset[0])
 
         wer_metric = datasets.load_metric("wer")
         cer_metric = datasets.load_metric("cer")
@@ -495,18 +537,25 @@ if __name__ == "__main__":
             eval_dataset=val_dataset,
             tokenizer=processor.feature_extractor,
             callbacks=[NSMLCallback],
-            optimizers=(transformers.AdamW(model.parameters(), lr=training_args.learning_rate), 
-                transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
-                    transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
-                    num_warmup_steps=training_args.warmup_steps,
-                    num_training_steps = training_args.num_train_epochs * (len(train_dataset)//training_args.per_device_train_batch_size // training_args.gradient_accumulation_steps // training_args.world_size),
-                    num_cycles=training_args.num_train_epochs
-                )
+            optimizers=(transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
+                        transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
+                transformers.AdamW(model.parameters(),
+                                   lr=training_args.learning_rate),
+                num_warmup_steps=training_args.warmup_steps,
+                num_training_steps=training_args.num_train_epochs *
+                (len(train_dataset)//training_args.per_device_train_batch_size //
+                 training_args.gradient_accumulation_steps // training_args.world_size),
+                num_cycles=training_args.num_train_epochs
+            )
             )
         )
 
         print("Training start")
-        trainer.train()
+        try:
+            trainer.train()
+        except:
+            print('error occured')
+            pass
         print("Training done!")
         # clear disk
         train_dataset.cleanup_cache_files()
@@ -514,5 +563,4 @@ if __name__ == "__main__":
 
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
-        shutil.rmtree('./data')
         print('Cleaning done!')
