@@ -299,9 +299,7 @@ class NSMLCallback(TrainerCallback):
                      control: TrainerControl, **kwargs):
         global dict_for_infer
         dict_for_infer = {
-            'model': model.state_dict(),
-            'epochs': state.epoch,
-            'learning_rate': args.learning_rate,
+            # 'model': model.state_dict(),
             'tokenizer': tokenizer,
             'processor': processor,
             'device': device,
@@ -330,6 +328,48 @@ class NSMLCallback(TrainerCallback):
 
 def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
+
+
+from ctcdecode import CTCBeamDecoder
+def predict(test_dataset):
+    result_list = []
+    decoder = CTCBeamDecoder(
+        list(processor.tokenizer.get_vocab().keys()),
+        model_path=None,
+        alpha=0,
+        beta=0,
+        cutoff_top_n=40,
+        cutoff_prob=1.0,
+        beam_width=100,
+        num_processes=4,
+        blank_id=0,
+        log_probs_input=False
+    )
+
+    def map_to_result(batch):
+        model.to(device)
+
+        input_values = processor(
+            batch["data"],
+            sampling_rate=batch["sampling_rate"],
+            return_tensors="pt").input_values.to(device)
+
+        with torch.no_grad():
+            logits = model(input_values).logits
+
+        # pred_ids = torch.argmax(logits, dim=-1)
+        # pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
+        #                                    processor)
+        
+        beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
+        pred_ids = beam_results[0][0][:out_lens[0][0]]
+        result_list.append(join_jamos(
+            processor.batch_decode(pred_ids)))
+
+        return None
+
+    test_dataset.map(map_to_result)
+    return result_list
 
 
 def bind_model(model, parser):
@@ -366,29 +406,8 @@ def bind_model(model, parser):
         test_file_list = path_loader(test_path)
         test_dataset = prepare_dataset(test_file_list, None, processor,
                                        data_args)
-        result_list = []
-
-        def map_to_result(batch):
-            model.to(device)
-
-            input_values = processor(
-                batch["data"],
-                sampling_rate=batch["sampling_rate"],
-                return_tensors="pt").input_values.to("cuda")
-
-            with torch.no_grad():
-                logits = model(input_values).logits
-
-            pred_ids = torch.argmax(logits, dim=-1)
-            pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
-                                               processor)
-            result_list.append(join_jamos(
-                processor.batch_decode(pred_ids)[0]))
-
-            return None
-
-        test_dataset.map(map_to_result)
-
+        
+        result_list = predict(test_dataset)
         prob = [1] * len(result_list)
 
         # DONOTCHANGE: They are reserved for nsml
@@ -447,7 +466,7 @@ if __name__ == "__main__":
         print('Cleaning done!')
         exit(0)
 
-    model = AutoModelForPreTraining.from_pretrained(
+    model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         activation_dropout=model_args.activation_dropout,
@@ -459,6 +478,7 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
+    
 
     bind_model(model, training_args)
     if model_args.pause:
@@ -498,7 +518,9 @@ if __name__ == "__main__":
                                                          args=data_args)
         print("Finished dataset preparation")
 
-        print(train_dataset[0])
+        # print(train_dataset[0])
+        
+        bind_model(model, training_args)
 
         wer_metric = datasets.load_metric("wer")
         cer_metric = datasets.load_metric("cer")
