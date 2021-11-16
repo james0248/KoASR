@@ -380,31 +380,26 @@ def bind_model(model, parser):
         # directory
         os.makedirs(dir_name, exist_ok=True)
         save_dir = os.path.join(dir_name, 'checkpoint')
-        save_checkpoint(dict_for_infer, save_dir)
 
-        with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
+        with open(os.path.join(save_dir, "dict_for_infer"), "wb") as f:
             pickle.dump(dict_for_infer, f)
 
         print("저장 완료!")
 
     # 저장한 모델을 불러올 수 있는 함수입니다.
     def load(dir_name, *parser):
-        print(f"called load {dir_name}")
         save_dir = os.path.join(dir_name, 'checkpoint')
 
-        global checkpoint
-        checkpoint = torch.load(save_dir)
-
-        model.load_state_dict(checkpoint['model'])
-
         global dict_for_infer
-        with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
+        with open(os.path.join(save_dir, "dict_for_infer"), 'rb') as f:
             dict_for_infer = pickle.load(f)
+
+        model.load_state_dict(dict_for_infer['model'])
 
         print("로딩 완료!")
 
     def infer(test_path, **kwparser):
-        device = checkpoint['device']
+        device = dict_for_infer['device']
         test_file_list = path_loader(test_path)
         test_dataset = prepare_dataset(test_file_list, None, processor,
                                        data_args)
