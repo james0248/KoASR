@@ -299,7 +299,9 @@ class NSMLCallback(TrainerCallback):
                      control: TrainerControl, **kwargs):
         global dict_for_infer
         dict_for_infer = {
-            # 'model': model.state_dict(),
+            'model': model.state_dict(),
+            'epochs': state.epoch,
+            'learning_rate': args.learning_rate,
             'tokenizer': tokenizer,
             'processor': processor,
             'device': device,
