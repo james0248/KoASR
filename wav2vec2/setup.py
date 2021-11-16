@@ -11,6 +11,4 @@ setup(name='ladder_networks',
           'jiwer',
           'hangul_utils',
           'apex',
-          'gdown'
-          'git+https://github.com/parlance/ctcdecode'
       ])

@@ -1,7 +1,7 @@
 #! /bin/bash
 sleep 0m # Be patient!
 nsml run -e ./wav2vec2/main.py -d final_stt_2 \
-    -c 8 -g 1 --memory 70G --shm-size 13G -a \
+    -c 8 -g 1 --memory 30G --shm-size 13G -a \
     "--output_dir ./wav2vec2-korean-2
     --model_name_or_path facebook/wav2vec2-large-xlsr-53 
     --num_train_epochs 6

@@ -166,7 +166,7 @@ def predict(test_dataset):
         beam_width=100,
         num_processes=4,
         blank_id=0,
-        log_probs_input=False
+        log_probs_input=True # No softmax layer in Wav2Vec2ForCTC
     )
 
     def map_to_result(batch):
@@ -180,15 +180,24 @@ def predict(test_dataset):
         with torch.no_grad():
             logits = model(input_values).logits
 
+
         # pred_ids = torch.argmax(logits, dim=-1)
         # pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
         #                                    processor)
+        # pred_str = join_jamos(processor.batch_decode(pred_ids))
         
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
-        pred_ids = beam_results[0][0][:out_lens[0][0]]
-        result_list.append(join_jamos(
-            processor.batch_decode(pred_ids)))
+        pred_ids = beam_results[0][0][:out_lens[0][0]] # select best predection
 
+        decoded_str = processor.batch_decode(pred_ids)
+        pred_str = ""
+        for char in decoded_str[:-1]:
+            pred_str += " " if char=="" else char
+        if decoded_str[-1] != "":
+            pred_str += decoded_str[-1]
+        pred_str = join_jamos(pred_str)
+
+        result_list.append(pred_str)
         return None
 
     test_dataset.map(map_to_result)
@@ -200,19 +209,17 @@ def bind_model(model, parser):
     def save(dir_name, *parser):
         # directory
         os.makedirs(dir_name, exist_ok=True)
-        save_dir = os.path.join(dir_name, 'checkpoint')
 
-        with open(os.path.join(save_dir, "dict_for_infer"), "wb") as f:
+        with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
             pickle.dump(dict_for_infer, f)
 
         print("저장 완료!")
 
     # 저장한 모델을 불러올 수 있는 함수입니다.
     def load(dir_name, *parser):
-        save_dir = os.path.join(dir_name, 'checkpoint')
 
         global dict_for_infer
-        with open(os.path.join(save_dir, "dict_for_infer"), 'rb') as f:
+        with open(os.path.join(dir_name, "dict_for_infer"), 'rb') as f:
             dict_for_infer = pickle.load(f)
 
         model.load_state_dict(dict_for_infer['model'])
@@ -304,10 +311,11 @@ if __name__ == "__main__":
     if model_args.pause:
         nsml.paused(scope=locals())
 
+
     if data_args.mode == 'train':
         if model_args.data_type == 1:
             # print("No pretrained model yet")
-            nsml.load(checkpoint='5', session='nia1030/final_stt_2/44')
+            nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
         elif model_args.data_type == 2:
             # print("No pretrained model yet")
             nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')

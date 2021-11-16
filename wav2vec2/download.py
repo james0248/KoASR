@@ -1,6 +1,5 @@
 import re
 import pandas as pd
-import gdown
 import os
 from pathlib import Path
 import nsml
@@ -197,14 +196,13 @@ def download_aihub_file(code):
     '''
     -data
 
-    -gdown
+    -train/val
         -A.tar.gz
         -B.tar.gz...
 
     -extract
         -data
             -remote ....
-    -data.tar -> for save
     '''
 
     train_dir = Path('./train')
@@ -215,7 +213,6 @@ def download_aihub_file(code):
     extract_dir.mkdir(exist_ok=True)
     data_dir = Path('./data')
     data_dir.mkdir(exist_ok=True)
-    # up to 50files
     # get code from this url
     # https://accounts.google.com/o/oauth2/v2/auth?scope=https%3A//www.googleapis.com/auth/drive.readonly&access_type=offline&include_granted_scopes=true&redirect_uri=https%3A//localhost&response_type=code&client_id=98428905431-v81lasstvu3fohhhk2hn7ti2ecj0g7a8.apps.googleusercontent.com
     token, refresh = get_access_token(code)
@@ -240,25 +237,13 @@ def download_aihub_file(code):
             token = refresh_token(refresh)
             print(f'NEW TOKEN: {token}')
             start = time.time()
-    # Training data: folder containes ~220GB
-    # gdown.download_folder(id="10DYHdoizNokrb6WIIi-d0o7xILgFe2NH",
-    #                       quiet=False, use_cookies=True, output='./train')
 
-    # # Validation data: folder containes ~13GB
-    # gdown.download_folder(id="1vOdPuSCL7IjhGOYkzfO_aIxiKifGdnxd",
-    #                       quiet=False, use_cookies=True, output='./val')
 
     print(f"ls -l {str(train_dir)}")
     os.system(f"ls -l {str(train_dir)}")
     print(f"ls -l {str(val_dir)}")
     os.system(f"ls -l {str(val_dir)}")
 
-    # i = 0
-    # for gzfile in train_dir.iterdir():
-    #     print(f"checkpoint {100+i} binding to {str(gzfile)}")
-    #     bind_dataset(str(gzfile))
-    #     nsml.save(100+i)
-    #     i += 1
 
     for gzfile in train_dir.iterdir():
         print(f"tar -zxf {str(gzfile)} -C {str(extract_dir)}")
@@ -268,11 +253,6 @@ def download_aihub_file(code):
     os.system(
         f"mv {str(extract_dir/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data/*')} ./data")
 
-    # for gzfile in train_dir.iterdir():
-    #     print(f"checkpoint {100+i} binding to {str(gzfile)}")
-    #     bind_dataset(str(gzfile))
-    #     nsml.save(100+i)
-    #     i += 1
 
     for gzfile in val_dir.iterdir():
         print(f"tar -zxf {str(gzfile)} -C {str(extract_dir)}")
@@ -285,22 +265,6 @@ def download_aihub_file(code):
     print(f"ls -l {str(data_dir)}")
     os.system(f"ls -l {str(data_dir)}")
 
-    # for dataset in ['dialog_02','dialog_03','dialog_04','hobby_01']:
-    #     try:
-    #         for key in ['label']:
-    #             id = id_dict[dataset][key]
-    #             output = Path('./gdown/data.tar.gz')
-    #             # print(f"downloading {id} to {str(output)}")
-    #             gdown.download(id = id, output = str(output), use_cookies= False)
-    #             os.system(f"ls -l {str(output.parent)}")
-    #             print(f"Start unzip .tar.gz")
-    #             os.system(f"tar -zxf {str(output)} -C {str(output.parent)}")
-    #             os.remove(str(output))
-    #             os.system(f"ls -l {str(output.parent)}")
-    #     except:
-    #         print("Error occured")
-    #         pass
-    # os.system(f"mv {str(output.parent/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data')} .")
 
     print("Remove downloaded tar files and decompressed files")
     shutil.rmtree(str(train_dir))
