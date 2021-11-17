@@ -8,7 +8,7 @@ setup(name='ladder_networks',
           'transformers==4.12.3',
           'torch==1.10.0',
           'librosa',
-          'jiwer',
+          'jiwer==2.2.0',
           'hangul_utils',
           'apex',
       ])

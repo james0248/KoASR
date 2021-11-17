@@ -155,6 +155,9 @@ def save_checkpoint(checkpoint, dir):
 
 from ctcdecode import CTCBeamDecoder
 def predict(test_dataset):
+    model.to(device)
+    model.eval()
+    
     result_list = []
     decoder = CTCBeamDecoder(
         list(processor.tokenizer.get_vocab().keys()),
@@ -170,7 +173,6 @@ def predict(test_dataset):
     )
 
     def map_to_result(batch):
-        model.to(device)
 
         input_values = processor(
             batch["data"],
