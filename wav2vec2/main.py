@@ -405,9 +405,10 @@ if __name__ == "__main__":
         print("Training start")
         try:
             trainer.train()
-        except:
+        except Exception as error:
+            logging.exception(error)
             print('error occured')
-            pass
+            
         print("Training done!")
         # clear disk
         train_dataset.cleanup_cache_files()
