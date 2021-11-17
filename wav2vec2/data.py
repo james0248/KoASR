@@ -20,9 +20,9 @@ not_kor = {}
 def init_data():
     vocab = {
         "[PAD]": 0,
-        "[UNK]": 1,
-        "[SOS]": 2,
-        "[EOS]": 3,
+        "<unk>": 1,
+        "<s>": 2,
+        "</s>": 3,
         "|": 4,
         "ㄱ": 5,
         "ㄴ": 6,
@@ -140,7 +140,7 @@ def map_to_array(batch, idx):
                                       res_type='polyphase'
                                       )
 
-    # truncate files longer than 240_000 = 15s (22 files in final_stt_2)
+    # truncate files longer than 240_000 = 15s(22 files in final_stt_2)
     if(len(resampled_data) > 240_500):
         print(f"Long file detected: length = {len(resampled_data)}")
         resampled_data = resampled_data[:240_000]
@@ -212,6 +212,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         train_data = load_from_disk('./train_temp')
         val_data = load_from_disk('./val_temp')
 
+        # """
         train_data = train_data.map(
             split_and_remove_special_characters,
             num_proc=args.preprocessing_num_workers,
@@ -220,6 +221,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
             split_and_remove_special_characters,
             num_proc=args.preprocessing_num_workers,
         )
+        # """
         # print(not_kor)
         # print(train_data[:10]['text'])
 
@@ -258,10 +260,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         # )
         # toc = time.perf_counter()
         # print(f"Filter done in {toc-tic:.1f}s")
-        print("Size after filter")
-        print(f"train_Data : {len(train_data)}")
-        print(f"val_Data : {len(val_data)}")
-
+        # """
         print("Start preprocess")
         tic = time.perf_counter()
 
@@ -283,6 +282,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         )
         toc = time.perf_counter()
         print(f"Preprocess done in {toc-tic:.1f}s")
+        # """
 
         set_verbosity_info()
 
