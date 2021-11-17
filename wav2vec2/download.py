@@ -130,6 +130,25 @@ class DatasetWrapper():
         self.dataset = dataset
 
 
+def bind_raw(file):
+    def save(dir_name, *parser):
+        os.makedirs(dir_name, exist_ok=True)
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        os.makedirs(save_dir, exist_ok=True)
+        os.system(
+            f"mv {str(Path(file))} {str(Path(save_dir) / (Path(file)))}")
+        global saved_path
+        saved_path = str(Path(save_dir) / (Path(file)))
+        print("데이터 저장 완료!")
+
+    def load(dir_name, *parser):
+        save_dir = os.path.join(dir_name, 'checkpoint')
+        os.system(
+            f"mv {str(Path(save_dir) / (Path(file)))} {str(Path(file))}")
+        print("데이터 로딩 완료!")
+    nsml.bind(save=save, load=load)
+
+
 def bind_dataset(train: DatasetWrapper, val: DatasetWrapper):
     def save(dir_name, *parser):
         os.makedirs(dir_name, exist_ok=True)
@@ -156,8 +175,6 @@ def get_access_token(code):
     code = parse.quote(code)
     client_id = parse.quote(client_id)
     client_secret = parse.quote(client_secret)
-    redirect_url = parse.quote("https://localhost")
-    grant = parse.quote("authorization_code")
 
     # Working!!
     # os.system(
@@ -193,18 +210,6 @@ def refresh_token(refresh):
 
 
 def download_aihub_file(code):
-    '''
-    -data
-
-    -train/val
-        -A.tar.gz
-        -B.tar.gz...
-
-    -extract
-        -data
-            -remote ....
-    '''
-
     train_dir = Path('./train')
     train_dir.mkdir(exist_ok=True)
     val_dir = Path('./val')
@@ -238,12 +243,10 @@ def download_aihub_file(code):
             print(f'NEW TOKEN: {token}')
             start = time.time()
 
-
     print(f"ls -l {str(train_dir)}")
     os.system(f"ls -l {str(train_dir)}")
     print(f"ls -l {str(val_dir)}")
     os.system(f"ls -l {str(val_dir)}")
-
 
     for gzfile in train_dir.iterdir():
         print(f"tar -zxf {str(gzfile)} -C {str(extract_dir)}")
@@ -252,7 +255,6 @@ def download_aihub_file(code):
         f"mv {str(extract_dir/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data/*')} ./data")
     os.system(
         f"mv {str(extract_dir/'data/remote/PROJECT/AI학습데이터/KoreanSpeech/data/*')} ./data")
-
 
     for gzfile in val_dir.iterdir():
         print(f"tar -zxf {str(gzfile)} -C {str(extract_dir)}")
@@ -264,7 +266,6 @@ def download_aihub_file(code):
 
     print(f"ls -l {str(data_dir)}")
     os.system(f"ls -l {str(data_dir)}")
-
 
     print("Remove downloaded tar files and decompressed files")
     shutil.rmtree(str(train_dir))
@@ -286,30 +287,34 @@ def clean_label(string):
 
 def parse_label(path):
     df = pd.read_csv(path, header=None, names=['raw'])
-    df[['path', 'raw_text']] = df['raw'].str.split(' :: ', expand=True)
+    df[['path', 'text']] = df['raw'].str.split(' :: ', expand=True)
 
-    df['text'] = df['raw_text'].map(clean_label)
-    df['bad'] = df['text'].map(
-        lambda x: len(x)-len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣|.?! ]", x)) > 0
-        or len(x) < 10 or len(x) > 50 or len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]", x)) == 0
-    )
+    # df['text'] = df['raw_text'].map(clean_label)
+    # df['bad'] = df['text'].map(
+    #     lambda x: len(x)-len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣|.?! ]", x)) > 0
+    #     or len(x) < 10 or len(x) > 50 or len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]", x)) == 0
+    # )
     df['path'] = df['path'].map(
-        lambda row: os.path.join('./data', row[1:]))
+        lambda row: os.path.join(saved_path, row[1:]))
     # print(df['bad'].sum())
     # print(df[df['bad']]['text'][:5])
-    clean_df = df[df['bad'] == False][['path', 'text']]
-    print(f'Total dataset length {len(clean_df)}')
-    return clean_df
+    # clean_df = df[df['bad'] == False][['path', 'text']]
+    # print(f'Total dataset length {len(clean_df)}')
+    return df
 
 
 def save_external_data(processor, args):
     # Download AI Hub data
     download_aihub_file(args.gdrive_code)
+    bind_raw('./data')
+    print("Save raw data...")
+    nsml.save(100)
+    print("Saving done!")
 
     print("Parse labels from text file")
     # data/1.Training/1.라벨링데이터/1.방송/broadcast_01/broadcast_01_scripts.txt
     # data/2.Validation/1.라벨링데이터/1.방송/broadcast_01/broadcast_01_scripts.txt
-    train_label_path = Path('./data/1.Training/1.라벨링데이터/')
+    train_label_path = Path(os.path.join(saved_path, '1.Training', '1.라벨링데이터'))
     train_df = pd.DataFrame(columns=['path', 'text'])
     for subject in train_label_path.iterdir():
         for dataset in subject.iterdir():
@@ -321,7 +326,7 @@ def save_external_data(processor, args):
     train_df = train_df.drop_duplicates(subset='text')
     print(train_df['text'].value_counts().value_counts())
 
-    val_label_path = Path('./data/2.Validation/1.라벨링데이터/')
+    val_label_path = Path(os.path.join(saved_path, '2.Validation', '1.라벨링데이터'))
     val_df = pd.DataFrame(columns=['path', 'text'])
     for subject in val_label_path.iterdir():
         for dataset in subject.iterdir():
@@ -333,18 +338,21 @@ def save_external_data(processor, args):
     val_df = val_df.drop_duplicates(subset='text')
     print(val_df['text'].value_counts().value_counts())
 
-    print(train_df.head(5))
-    print(val_df.head(5))
-
     train_dataset, val_dataset = prepare_dataset(
         None, train_df, processor, args, val_df=val_df)
     train_dataset_wrapper = DatasetWrapper(train_dataset)
     val_dataset_wrapper = DatasetWrapper(val_dataset)
     bind_dataset(train_dataset_wrapper, val_dataset_wrapper)
 
+    print("Changing to dataset done.")
+
+    # PLEASE!!!
     print("Save external data to nsml checkpoint 1000...")
-    nsml.save(1000)
-    print("save complete! now you can safely exit this session")
+    try:
+        nsml.save(1000)
+        print("save complete! now you can safely exit this session")
+    except:
+        print("save failed! exiting this session...")
+        pass
     train_dataset.cleanup_cache_files()
     val_dataset.cleanup_cache_files()
-    shutil.rmtree('./data')
