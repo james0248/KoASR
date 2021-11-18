@@ -19,7 +19,7 @@ not_kor = {}
 
 def init_data():
     vocab = {
-        "[PAD]": 0,
+        "<pad>": 0,
         "<unk>": 1,
         "<s>": 2,
         "</s>": 3,
@@ -78,6 +78,7 @@ def init_data():
         ",": 56,
         "?": 57,
         ".": 58,
+        "!": 59,
     }
     os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
