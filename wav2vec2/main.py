@@ -22,13 +22,16 @@ from transformers.trainer_callback import TrainerControl, TrainerState
 
 from transformers import (HfArgumentParser, Trainer,
                           Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
-                          Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
+                          Wav2Vec2Model, Wav2Vec2ForCTC, HubertForCTC, SpeechEncoderDecoderModel,
+                          Wav2Vec2Config, BertConfig, SpeechEncoderDecoderConfig,Speech2Text2Processor, Speech2Text2Tokenizer,
+                          Wav2Vec2Processor, is_apex_available,
                           trainer_utils, TrainerCallback, AutoTokenizer,
                           AutoModelForPreTraining)
 
 from data import init_data, remove_duplicate_tokens, prepare_dataset
-from download import DatasetWrapper, bind_dataset, save_external_data
+from download import DatasetWrapper, bind_dataset, download_kenlm, save_external_data
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
+from customtrainer import CustomTrainer
 from nsml import DATASET_PATH
 
 import warnings
@@ -46,7 +49,7 @@ if version.parse(torch.__version__) >= version.parse("1.6"):
 
 
 @dataclass
-class DataCollatorCTCWithPadding:
+class CustomDataCollatorCTCWithPadding:
     """
     Data collator that will dynamically pad the inputs received.
     Args:
@@ -144,7 +147,8 @@ class NSMLCallback(TrainerCallback):
         if state.is_local_process_zero and 'loss' in logs:
             report_dict = {
                 'step': state.epoch,
-                'train_loss': logs['loss']
+                'train_loss': logs['loss'],
+                'learning_rate' : logs['learning_rate'], 
             }
             nsml.report(**report_dict)
 
@@ -183,21 +187,21 @@ def predict(test_dataset):
             logits = model(input_values).logits
 
 
-        # pred_ids = torch.argmax(logits, dim=-1)
-        # pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
-        #                                    processor)
-        # pred_str = join_jamos(processor.batch_decode(pred_ids))
-        
-        beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
-        pred_ids = beam_results[0][0][:out_lens[0][0]] # select best predection
+        pred_ids = torch.argmax(logits, dim=-1)
+        pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
+                                           processor)
+        pred_str = join_jamos(processor.batch_decode(pred_ids))
+        pred_str = pred_str.split('</s>')[0]
+        # beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
+        # pred_ids = beam_results[0][0][:out_lens[0][0]] # select best predection
 
-        decoded_str = processor.batch_decode(pred_ids)
-        pred_str = ""
-        for char in decoded_str[:-1]:
-            pred_str += " " if char=="" else char
-        if decoded_str[-1] != "":
-            pred_str += decoded_str[-1]
-        pred_str = join_jamos(pred_str)
+        # decoded_str = processor.batch_decode(pred_ids)
+        # pred_str = ""
+        # for char in decoded_str[:-1]:
+        #     pred_str += " " if char=="" else char
+        # if decoded_str[-1] != "":
+        #     pred_str += decoded_str[-1]
+        # pred_str = join_jamos(pred_str)
 
         result_list.append(pred_str)
         return None
@@ -294,19 +298,22 @@ if __name__ == "__main__":
         shutil.rmtree('./val_temp')
         print('Cleaning done!')
         exit(0)
-
-    model = Wav2Vec2ForCTC.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=model_args.cache_dir,
-        activation_dropout=model_args.activation_dropout,
-        attention_dropout=model_args.attention_dropout,
-        hidden_dropout=model_args.hidden_dropout,
-        feat_proj_dropout=model_args.feat_proj_dropout,
-        mask_time_prob=model_args.mask_time_prob,
-        gradient_checkpointing=model_args.gradient_checkpointing_,
-        layerdrop=model_args.layerdrop,
-        vocab_size=len(processor.tokenizer),
-    )
+    if data_args.mode == 'test':
+        #download_kenlm()
+        pass
+    
+    encoder_config = Wav2Vec2Config()
+    decoder_config = BertConfig()
+    config = SpeechEncoderDecoderConfig.from_encoder_decoder_configs(encoder_config, decoder_config)
+    assert len(model_args.model_name_or_path.split('+'))==2
+    model = SpeechEncoderDecoderModel.from_encoder_decoder_pretrained(model_args.model_name_or_path.split('+')[0],model_args.model_name_or_path.split('+')[1])
+    model.config = config
+    model.config.decoder_start_token_id = 2
+    model.config.decoder_end_token_id = 3
+    model.config.pad_token_id = 0
+    model.config.keys_to_ignore_at_inference = ["past_key_values","decoder_hidden_states","decoder_attentions","cross_attentions","encoder_last_hidden_state","encoder_hidden_states","encoder_attentions"]
+    print(model)
+    print(model.config)
     
 
     bind_model(model, training_args)
@@ -316,16 +323,15 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
+            print("No pretrained model yet")
+            #nsml.load(checkpoint='5', session='nia1030/final_stt_2/**')
         elif model_args.data_type == 2:
             # print("No pretrained model yet")
-            nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')
+            nsml.load(checkpoint='5', session='nia1030/final_stt_1/173')
+            # nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')
         # nsml.save(0)
         # exit()
-        # if model_args.data_type == 2:
-        #     label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
-
+        
         print("Dataset preparation begin!")
         train_dataset = Dataset.from_dict({})
         val_dataset = Dataset.from_dict({})
@@ -341,6 +347,8 @@ if __name__ == "__main__":
 
         else:
             file_list, label = path_loader(DATASET_PATH)
+            if model_args.data_type == 2:
+                label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
@@ -355,20 +363,28 @@ if __name__ == "__main__":
         wer_metric = datasets.load_metric("wer")
         cer_metric = datasets.load_metric("cer")
 
-        data_collator = DataCollatorCTCWithPadding(processor=processor,
+        data_collator = CustomDataCollatorCTCWithPadding(processor=processor, pad_to_multiple_of=128,
                                                    padding=True)
 
         def compute_metrics(pred):
-            pred_logits = pred.predictions
-            pred_ids = np.argmax(pred_logits, axis=-1)
+            # when you use custom trainer
+            pred_ids = pred.predictions
 
+            # when using defualt trainer
+            # pred_logits = pred.predictions
+            # pred_ids = np.argmax(pred_logits, axis=-1)
+            
             pred.label_ids[pred.label_ids ==
                            -100] = processor.tokenizer.pad_token_id
 
-            pred_str = processor.batch_decode(pred_ids)
+            pred_str = processor.batch_decode(pred_ids, group_tokens=False)
             # we do not want to group tokens when computing the metrics
             label_str = processor.batch_decode(pred.label_ids,
                                                group_tokens=False)
+            
+            for i in range(len(pred_str)):
+                pred_str[i] = pred_str[i].split('</s>')[0]
+                label_str[i] = label_str[i].split('</s')[0]
             print(f"pred : {[join_jamos(x) for x in pred_str[:5]]}")
             print(f"label : {[join_jamos(x) for x in label_str[:5]]}")
             wer = wer_metric.compute(predictions=pred_str,
@@ -378,27 +394,29 @@ if __name__ == "__main__":
             return {"wer": wer, "cer": cer}
 
         if model_args.freeze_feature_extractor:
-            model.freeze_feature_extractor()
+            model.encoder.feature_extractor._freeze_parameters()
 
-        trainer = Trainer(
+        # optimizer = transformers.Adafactor(model.parameters(), scale_parameter=True, relative_step=True, lr = None, warmup_init = True)
+        # lr_scheduler = transformers.optimization.AdafactorSchedule(optimizer)
+
+        # optimizer = torch.optim.SGD(model.parameters(), lr = training_args.learning_rate)
+        #parameter_dict = dict(model.named_parameters())
+        optimizer = torch.optim.AdamW(model.parameters(),
+         lr = training_args.learning_rate, amsgrad=True)
+        lr_scheduler = None
+
+
+        trainer = CustomTrainer(
             model=model,
             data_collator=data_collator,
             args=training_args,
             compute_metrics=compute_metrics,
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
-            tokenizer=processor.feature_extractor,
+            # tokenizer=processor.feature_extractor,
             callbacks=[NSMLCallback],
-            optimizers=(transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
-                        transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
-                transformers.AdamW(model.parameters(),
-                                   lr=training_args.learning_rate),
-                num_warmup_steps=training_args.warmup_steps,
-                num_training_steps=training_args.num_train_epochs *
-                (len(train_dataset)//training_args.per_device_train_batch_size //
-                 training_args.gradient_accumulation_steps // training_args.world_size),
-                num_cycles=training_args.num_train_epochs
-            )
+            optimizers=(optimizer,
+                        lr_scheduler
             )
         )
 

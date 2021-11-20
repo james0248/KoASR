@@ -113,10 +113,14 @@ def extract_all_chars(batch):
 
 
 def split_and_remove_special_characters(batch):
+    symbolic_words_regex = r'\([A-Z]*\:|\)'
+    batch["text"] = re.sub(symbolic_words_regex, '', batch["text"])
+
     chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
+    batch["text"] = re.sub(chars_to_ignore_regex, '', batch["text"])
+    
     batch["text"] = split_syllables(batch["text"])
-    batch["text"] = re.sub(chars_to_ignore_regex, '',
-                           batch["text"]).lower() + " "
+    batch["text"] = batch["text"] + " " + "</s>"
     return batch
 
 
