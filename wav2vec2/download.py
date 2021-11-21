@@ -1,4 +1,5 @@
 import re
+import gdown
 import pandas as pd
 import os
 from pathlib import Path
@@ -122,6 +123,7 @@ val_names = [
 # ]
 
 
+# Not in use
 class DatasetWrapper():
     def __init__(self, dataset):
         self.dataset = dataset
@@ -130,21 +132,20 @@ class DatasetWrapper():
         self.dataset = dataset
 
 
-def bind_raw(file):
+def bind_file(file):
     def save(dir_name, *parser):
         os.makedirs(dir_name, exist_ok=True)
         save_dir = os.path.join(dir_name, 'checkpoint')
         os.makedirs(save_dir, exist_ok=True)
         os.system(
-            f"mv {str(Path(file))} {str(Path(save_dir) / (Path(file)))}")
-        global saved_path
-        saved_path = str(Path(save_dir) / (Path(file)))
+            f"cp {str(Path(file))} {str(Path(save_dir) / (Path(file)))}")
         print("데이터 저장 완료!")
 
     def load(dir_name, *parser):
         save_dir = os.path.join(dir_name, 'checkpoint')
+        print(save_dir)
         os.system(
-            f"mv {str(Path(save_dir) / (Path(file)))} {str(Path(file))}")
+            f"cp {str(Path(save_dir) / (Path(file)))} {str(Path(file))}")
         print("데이터 로딩 완료!")
     nsml.bind(save=save, load=load)
 
@@ -167,6 +168,12 @@ def bind_dataset(train: DatasetWrapper, val: DatasetWrapper):
         print("데이터 로딩 완료!")
 
     nsml.bind(save=save, load=load)
+
+
+def download_gdrive(token, file_id, path):
+    print(f'Downloading {path}: {file_id}')
+    os.system(
+        f"curl -H 'Authorization: Bearer {token}' 'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media' -o {path}")
 
 
 def get_access_token(code):
@@ -226,18 +233,14 @@ def download_aihub_file(code):
 
     start = time.time()
     for ids, name in list(zip(train_ids, train_names)):
-        print(f'Downloading {name}: {ids}')
-        os.system(
-            f"curl -H 'Authorization: Bearer {token}' 'https://www.googleapis.com/drive/v3/files/{ids}?alt=media' -o {str(train_dir/name)}")
+        download_gdrive(token, ids, str(train_dir/name))
         if (time.time() - start > 3000):
             token = refresh_token(refresh)
             print(f'NEW TOKEN: {token}')
             start = time.time()
 
     for ids, name in list(zip(val_ids, val_names)):
-        print(f'Downloading {name}: {ids}')
-        os.system(
-            f"curl -H 'Authorization: Bearer {token}' 'https://www.googleapis.com/drive/v3/files/{ids}?alt=media' -o {str(val_dir/name)}")
+        download_gdrive(token, ids, str(val_dir/name))
         if (time.time() - start > 3000):
             token = refresh_token(refresh)
             print(f'NEW TOKEN: {token}')
@@ -295,7 +298,7 @@ def parse_label(path):
     #     or len(x) < 10 or len(x) > 50 or len(re.findall("[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]", x)) == 0
     # )
     df['path'] = df['path'].map(
-        lambda row: os.path.join(saved_path, row[1:]))
+        lambda row: os.path.join('./data', row[1:]))
     # print(df['bad'].sum())
     # print(df[df['bad']]['text'][:5])
     # clean_df = df[df['bad'] == False][['path', 'text']]
@@ -303,18 +306,16 @@ def parse_label(path):
     return df
 
 
-def save_external_data(processor, args):
+def get_external_data(processor, args):
     # Download AI Hub data
+    print("Download aihub data...")
     download_aihub_file(args.gdrive_code)
-    bind_raw('./data')
-    print("Save raw data...")
-    nsml.save(100)
-    print("Saving done!")
+    print("Download complete!")
 
     print("Parse labels from text file")
     # data/1.Training/1.라벨링데이터/1.방송/broadcast_01/broadcast_01_scripts.txt
     # data/2.Validation/1.라벨링데이터/1.방송/broadcast_01/broadcast_01_scripts.txt
-    train_label_path = Path(os.path.join(saved_path, '1.Training', '1.라벨링데이터'))
+    train_label_path = Path(os.path.join('./data', '1.Training', '1.라벨링데이터'))
     train_df = pd.DataFrame(columns=['path', 'text'])
     for subject in train_label_path.iterdir():
         for dataset in subject.iterdir():
@@ -326,7 +327,7 @@ def save_external_data(processor, args):
     train_df = train_df.drop_duplicates(subset='text')
     print(train_df['text'].value_counts().value_counts())
 
-    val_label_path = Path(os.path.join(saved_path, '2.Validation', '1.라벨링데이터'))
+    val_label_path = Path(os.path.join('./data', '2.Validation', '1.라벨링데이터'))
     val_df = pd.DataFrame(columns=['path', 'text'])
     for subject in val_label_path.iterdir():
         for dataset in subject.iterdir():
@@ -340,28 +341,17 @@ def save_external_data(processor, args):
 
     train_dataset, val_dataset = prepare_dataset(
         None, train_df, processor, args, val_df=val_df)
-    train_dataset_wrapper = DatasetWrapper(train_dataset)
-    val_dataset_wrapper = DatasetWrapper(val_dataset)
-    bind_dataset(train_dataset_wrapper, val_dataset_wrapper)
 
     print("Changing to dataset done.")
 
-    # PLEASE!!!
-    print("Save external data to nsml checkpoint 1000...")
-    try:
-        nsml.save(1000)
-        print("save complete! now you can safely exit this session")
-    except:
-        print("save failed! exiting this session...")
-        pass
+    return train_dataset, val_dataset
     train_dataset.cleanup_cache_files()
     val_dataset.cleanup_cache_files()
 
 
 def download_kenlm():
-    import gdown
     id = '1p9gHsKNs1iKq3Jz72doMJWYu6mBp9sX5'
     path = Path('./model.arpa')
-    gdown.download(id = id, output = str(path), use_cookies = False)
+    gdown.download(id=id, output=str(path), use_cookies=False)
     print("Download complete")
     return path
