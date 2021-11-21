@@ -22,11 +22,11 @@ def clean_label(string: str):
                     repl=repl_function, string=string)
     string = re.sub(pattern="[a-zA-Z]", repl='', string=string)
     string = re.sub(pattern="[+*/]", repl='', string=string)
-    string = re.sub(pattern="\.[^\s\.\n0-9]",
+    string = re.sub(pattern="[.][^\s\.\n0-9]",
                     repl=repl_function_2, string=string)
     string = re.sub(pattern="\s+", repl=' ', string=string)
-    string = re.sub(pattern="\s+\.", repl='.', string=string)
-    string = re.sub(pattern="\.{2}", repl='.', string=string)
+    string = re.sub(pattern="\s+[.]", repl='.', string=string)
+    string = re.sub(pattern="[.]{2}", repl='.', string=string)
     string = string.replace('%', '퍼센트')
     string = string.replace('フ', 'ㄱ')
     string = string.replace('．', '.')
