@@ -159,6 +159,10 @@ def save_checkpoint(checkpoint, dir):
 
 from ctcdecode import CTCBeamDecoder
 def predict(test_dataset):
+    model.config.keys_to_ignore_at_inference = None
+    model.config.encoder.max_length = 100
+    model.config.decoder.max_length = 100
+    print(model.config)
     model.to(device)
     model.eval()
     
@@ -182,27 +186,22 @@ def predict(test_dataset):
             batch["data"],
             sampling_rate=batch["sampling_rate"],
             return_tensors="pt").input_values.to(device)
-
+        
         with torch.no_grad():
-            logits = model(input_values).logits
-
-
-        pred_ids = torch.argmax(logits, dim=-1)
-        pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
-                                           processor)
-        pred_str = join_jamos(processor.batch_decode(pred_ids))
+            pred_ids = model.generate(
+                input_values,
+                max_length=100,
+            )
+            
+        decoded_str = processor.batch_decode(pred_ids, group_tokens = False)
+        pred_str = ""
+        for char in decoded_str[:-1]:
+            pred_str += " " if char=="" else char
+        if decoded_str[-1] != "":
+            pred_str += decoded_str[-1]
+        pred_str = join_jamos(pred_str)
         pred_str = pred_str.split('</s>')[0]
-        # beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
-        # pred_ids = beam_results[0][0][:out_lens[0][0]] # select best predection
-
-        # decoded_str = processor.batch_decode(pred_ids)
-        # pred_str = ""
-        # for char in decoded_str[:-1]:
-        #     pred_str += " " if char=="" else char
-        # if decoded_str[-1] != "":
-        #     pred_str += decoded_str[-1]
-        # pred_str = join_jamos(pred_str)
-
+        pred_str = pred_str[3:]
         result_list.append(pred_str)
         return None
 
