@@ -356,3 +356,12 @@ def save_external_data(processor, args):
         pass
     train_dataset.cleanup_cache_files()
     val_dataset.cleanup_cache_files()
+
+
+def download_kenlm():
+    import gdown
+    id = '1p9gHsKNs1iKq3Jz72doMJWYu6mBp9sX5'
+    path = Path('./model.arpa')
+    gdown.download(id = id, output = str(path), use_cookies = False)
+    print("Download complete")
+    return path

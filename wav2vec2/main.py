@@ -27,7 +27,7 @@ from transformers import (HfArgumentParser, Trainer,
                           AutoModelForPreTraining)
 
 from data import init_data, remove_duplicate_tokens, prepare_dataset
-from download import DatasetWrapper, bind_dataset, save_external_data
+from download import DatasetWrapper, bind_dataset, download_kenlm, save_external_data
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
 from nsml import DATASET_PATH
 
@@ -144,7 +144,8 @@ class NSMLCallback(TrainerCallback):
         if state.is_local_process_zero and 'loss' in logs:
             report_dict = {
                 'step': state.epoch,
-                'train_loss': logs['loss']
+                'train_loss': logs['loss'],
+                'learning_rate' : logs['learning_rate'], 
             }
             nsml.report(**report_dict)
 
@@ -294,7 +295,9 @@ if __name__ == "__main__":
         shutil.rmtree('./val_temp')
         print('Cleaning done!')
         exit(0)
-
+    if data_args.mode == 'test':
+        pass
+        # download_kenlm()
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -307,6 +310,7 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
+    print(model)
     
 
     bind_model(model, training_args)
@@ -316,15 +320,13 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
+            print("No pretrained model yet")
+            # nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
         elif model_args.data_type == 2:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')
+            print("No pretrained model yet")
+            # nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')
         # nsml.save(0)
         # exit()
-        # if model_args.data_type == 2:
-        #     label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
 
         print("Dataset preparation begin!")
         train_dataset = Dataset.from_dict({})
@@ -341,6 +343,8 @@ if __name__ == "__main__":
 
         else:
             file_list, label = path_loader(DATASET_PATH)
+            if model_args.data_type == 2:
+                label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
@@ -355,7 +359,7 @@ if __name__ == "__main__":
         wer_metric = datasets.load_metric("wer")
         cer_metric = datasets.load_metric("cer")
 
-        data_collator = DataCollatorCTCWithPadding(processor=processor,
+        data_collator = DataCollatorCTCWithPadding(processor=processor, pad_to_multiple_of=128,
                                                    padding=True)
 
         def compute_metrics(pred):
@@ -380,6 +384,13 @@ if __name__ == "__main__":
         if model_args.freeze_feature_extractor:
             model.freeze_feature_extractor()
 
+        # optimizer = transformers.Adafactor(model.parameters(), scale_parameter=True, relative_step=True, lr = None, warmup_init = True)
+        # lr_scheduler = transformers.optimization.AdafactorSchedule(optimizer)
+
+        optimizer = torch.optim.AdamW(model.parameters(),
+         lr = training_args.learning_rate, amsgrad=True)
+        lr_scheduler = None
+
         trainer = Trainer(
             model=model,
             data_collator=data_collator,
@@ -389,16 +400,8 @@ if __name__ == "__main__":
             eval_dataset=val_dataset,
             tokenizer=processor.feature_extractor,
             callbacks=[NSMLCallback],
-            optimizers=(transformers.AdamW(model.parameters(), lr=training_args.learning_rate),
-                        transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
-                transformers.AdamW(model.parameters(),
-                                   lr=training_args.learning_rate),
-                num_warmup_steps=training_args.warmup_steps,
-                num_training_steps=training_args.num_train_epochs *
-                (len(train_dataset)//training_args.per_device_train_batch_size //
-                 training_args.gradient_accumulation_steps // training_args.world_size),
-                num_cycles=training_args.num_train_epochs
-            )
+            optimizers=(optimizer,
+                        lr_scheduler
             )
         )
 
