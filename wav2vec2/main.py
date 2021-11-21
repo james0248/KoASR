@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from ctcdecode import CTCBeamDecoder
 import logging
 from glob import glob
 import pickle
@@ -41,8 +42,6 @@ if is_apex_available():
 if version.parse(torch.__version__) >= version.parse("1.6"):
     _is_native_amp_available = True
     from torch.cuda.amp import autocast
-
-
 
 
 @dataclass
@@ -154,11 +153,10 @@ def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
 
 
-from ctcdecode import CTCBeamDecoder
 def predict(test_dataset):
     model.to(device)
     model.eval()
-    
+
     result_list = []
     decoder = CTCBeamDecoder(
         list(processor.tokenizer.get_vocab().keys()),
@@ -170,7 +168,7 @@ def predict(test_dataset):
         beam_width=100,
         num_processes=4,
         blank_id=0,
-        log_probs_input=True # No softmax layer in Wav2Vec2ForCTC
+        log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
     )
 
     def map_to_result(batch):
@@ -183,19 +181,19 @@ def predict(test_dataset):
         with torch.no_grad():
             logits = model(input_values).logits
 
-
         # pred_ids = torch.argmax(logits, dim=-1)
         # pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
         #                                    processor)
         # pred_str = join_jamos(processor.batch_decode(pred_ids))
-        
+
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
-        pred_ids = beam_results[0][0][:out_lens[0][0]] # select best predection
+        # select best predection
+        pred_ids = beam_results[0][0][:out_lens[0][0]]
 
         decoded_str = processor.batch_decode(pred_ids)
         pred_str = ""
         for char in decoded_str[:-1]:
-            pred_str += " " if char=="" else char
+            pred_str += " " if char == "" else char
         if decoded_str[-1] != "":
             pred_str += decoded_str[-1]
         pred_str = join_jamos(pred_str)
@@ -234,7 +232,7 @@ def bind_model(model, parser):
         test_file_list = path_loader(test_path)
         test_dataset = prepare_dataset(test_file_list, None, processor,
                                        data_args)
-        
+
         result_list = predict(test_dataset)
         prob = [1] * len(result_list)
 
@@ -310,13 +308,15 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
+<<<<<<< HEAD
     print(model)
     
+=======
+>>>>>>> fe5fc19 (Format code)
 
     bind_model(model, training_args)
     if model_args.pause:
         nsml.paused(scope=locals())
-
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
@@ -353,7 +353,7 @@ if __name__ == "__main__":
         print("Finished dataset preparation")
 
         # print(train_dataset[0])
-        
+
         bind_model(model, training_args)
 
         wer_metric = datasets.load_metric("wer")
