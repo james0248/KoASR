@@ -1,1 +1,1 @@
-git+git://github.com/parlance/ctcdecode@master#egg=ctcdecode
+git+git://github.com/james0248/ctcdecode@master#egg=ctcdecode
