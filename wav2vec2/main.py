@@ -36,10 +36,6 @@ from transformers import (HfArgumentParser, Trainer,
                           trainer_utils, TrainerCallback, AutoTokenizer,
                           AutoModelForPreTraining, BartForConditionalGeneration)
 
-<< << << < HEAD
-== == == =
->>>>>> > e75ea8a(Make external data download always)
-
 
 warnings.filterwarnings(action='ignore')
 
@@ -190,7 +186,7 @@ def predict(test_dataset):
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
         # select best predection
         pred_ids = [beam_results[i][0][:out_lens[i][0]]
-            for i in range(out_lens.shape[0])]
+                    for i in range(out_lens.shape[0])]
         decoded_strings = processor.batch_decode(pred_ids)
 
         for i in range(out_lens.shape[0]):
@@ -292,15 +288,12 @@ if __name__ == "__main__":
     processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                   tokenizer=tokenizer)
 
-<< << << < HEAD
     if data_args.load_external_data:
         get_external_data(processor, args=data_args)
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
         print('Cleaning done!')
         exit(0)
-== == == =
->>>>>> > e75ea8a(Make external data download always)
     if data_args.mode == 'test':
         path = Path('./model.arpa')
         bind_file(str(path))
@@ -320,14 +313,11 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
-<< << << < HEAD
     # print(model)
 
-== == == =
     gec_tokenizer = AutoTokenizer.from_pretrained("hyunwoongko/kobart")
     gec_model = BartForConditionalGeneration.from_pretrained(
         "hyunwoongko/kobart")
->>>>>> > e75ea8a(Make external data download always)
 
     bind_model(model, training_args)
     if model_args.pause:
@@ -354,13 +344,10 @@ if __name__ == "__main__":
         else:
             file_list, label = path_loader(DATASET_PATH)
             if model_args.data_type == 2:
-<< << << < HEAD
                 label['no_header'] = label['file_name'].apply(
                     lambda row: int(row[3:]) < 118681)
-== == == =
                 label = label[label['file_name'].apply(
                     lambda row: int(row[3:]) >= 118681)]
->>>>>> > e75ea8a(Make external data download always)
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
