@@ -3,7 +3,7 @@ import warnings
 from nsml import DATASET_PATH
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
 from download import download_kenlm, get_external_data, bind_file
-from data import init_data, remove_duplicate_tokens, prepare_dataset
+from data import init_data, prepare_dataset
 from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data
 from data import init_data, prepare_dataset
 from ctcdecode import CTCBeamDecoder
@@ -346,8 +346,6 @@ if __name__ == "__main__":
             if model_args.data_type == 2:
                 label['no_header'] = label['file_name'].apply(
                     lambda row: int(row[3:]) < 118681)
-                label = label[label['file_name'].apply(
-                    lambda row: int(row[3:]) >= 118681)]
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
