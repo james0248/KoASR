@@ -343,15 +343,17 @@ def get_external_data(processor, args):
         None, train_df, processor, args, val_df=val_df)
 
     print("Changing to dataset done.")
-
     return train_dataset, val_dataset
-    train_dataset.cleanup_cache_files()
-    val_dataset.cleanup_cache_files()
 
 
 def download_kenlm():
-    id = '1p9gHsKNs1iKq3Jz72doMJWYu6mBp9sX5'
+    id = '1o7Z8mCTgoI5a2zqbjEh6Yp-GUilCDLaV'
     path = Path('./model.arpa')
     gdown.download(id=id, output=str(path), use_cookies=False)
-    print("Download complete")
-    return path
+    print("Download complete!")
+    print("Starting save...")
+    bind_file(str(path))
+    nsml.save(1000)
+    print("Save complete on 1000!")
+    os.system(f'rm {str(path)}')
+    exit(0)
