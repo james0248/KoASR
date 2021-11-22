@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import warnings
 from nsml import DATASET_PATH
-from transformers.utils.dummy_tokenizers_objects import BartTokenizerFast
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
 from data import init_data, prepare_dataset
 from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data, bind_file
