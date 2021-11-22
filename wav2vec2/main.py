@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datasets.arrow_dataset import Dataset
 
 from hangul_utils import join_jamos
-import transformers
+import re
 from gpuinfo import get_gpu_info
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
@@ -27,8 +27,8 @@ from transformers import (HfArgumentParser, Trainer,
                           trainer_utils, TrainerCallback, AutoTokenizer,
                           AutoModelForPreTraining)
 
-from data import init_data, remove_duplicate_tokens, prepare_dataset
-from download import DatasetWrapper, bind_dataset, download_kenlm, save_external_data
+from data import init_data, prepare_dataset
+from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
 from nsml import DATASET_PATH
 
@@ -126,7 +126,7 @@ class NSMLCallback(TrainerCallback):
             'processor': processor,
             'device': device,
         }
-        nsml.save(int(state.epoch))
+        #nsml.save(int(state.epoch))
 
     def on_evaluate(self, args: TrainingArguments, state: TrainerState,
                     control: TrainerControl, metrics, **kwargs):
@@ -197,7 +197,7 @@ def predict(test_dataset):
         if decoded_str[-1] != "":
             pred_str += decoded_str[-1]
         pred_str = join_jamos(pred_str)
-
+        pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
         result_list.append(pred_str)
         return None
 
@@ -288,7 +288,7 @@ if __name__ == "__main__":
                                   tokenizer=tokenizer)
 
     if data_args.load_external_data:
-        save_external_data(processor, args=data_args)
+        get_external_data(processor, args=data_args)
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
         print('Cleaning done!')
@@ -308,11 +308,8 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
-<<<<<<< HEAD
     print(model)
     
-=======
->>>>>>> fe5fc19 (Format code)
 
     bind_model(model, training_args)
     if model_args.pause:
@@ -324,7 +321,7 @@ if __name__ == "__main__":
             # nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
         elif model_args.data_type == 2:
             print("No pretrained model yet")
-            # nsml.load(checkpoint='2', session='nia1030/final_stt_1/22')
+            # nsml.load(checkpoint='4', session='nia1030/final_stt_1/188')
         # nsml.save(0)
         # exit()
 
@@ -344,7 +341,7 @@ if __name__ == "__main__":
         else:
             file_list, label = path_loader(DATASET_PATH)
             if model_args.data_type == 2:
-                label = label[label['file_name'].apply(lambda row: int(row[3:])>=118681)]
+                label['no_header'] = label['file_name'].apply(lambda row: int(row[3:])<118681)
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,

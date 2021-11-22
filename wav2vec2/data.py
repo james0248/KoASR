@@ -4,18 +4,14 @@ import numpy as np
 import re
 import json
 import librosa
-from hangul_utils import join_jamos, split_syllables
+from hangul_utils import split_syllables
 from sklearn.model_selection import train_test_split
 from datasets import Dataset, load_from_disk
-
-from datasets.utils.logging import set_verbosity_error, set_verbosity_info
 
 from nsml import DATASET_PATH
 import os
 import time
-
-not_kor = {}
-
+from pathlib import Path
 
 def init_data():
     vocab = {
@@ -84,27 +80,6 @@ def init_data():
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
         json.dump(vocab, vocab_file)
 
-
-def remove_duplicate_tokens(token_list, processor):
-    prev_token = -1
-    clean_token_list = []
-    for token in token_list:
-        if token == processor.tokenizer.convert_tokens_to_ids('[PAD]'):
-            prev_token = -1
-        elif token != prev_token:
-            prev_token = token
-            clean_token_list.append(token)
-
-    return [clean_token_list]
-
-
-def decode_CTC(token_list, processor):
-    clean_token_list = remove_duplicate_tokens(token_list, processor)
-    raw_char_list = list(map(processor.convert, clean_token_list))
-    joined_string = join_jamos(''.join(raw_char_list))
-    return joined_string
-
-
 # Currently not in use
 def extract_all_chars(batch):
     all_text = " ".join(batch["text"])
@@ -112,57 +87,81 @@ def extract_all_chars(batch):
     return {"vocab": [vocab], "all_text": [all_text]}
 
 
-def split_and_remove_special_characters(batch):
+def clean_and_split_syllables(batch):
+    '''
+    preprocess text using regex & split syllables
+    '''
     symbolic_words_regex = r'\([A-Z]*\:|\)'
     batch["text"] = re.sub(symbolic_words_regex, '', batch["text"])
 
-    chars_to_ignore_regex = '[\-\;\:\"\“\%\‘\”]'
+    chars_to_ignore_regex = r'[\r\n\-\;\:\'\"\%\‘\’\“\”]'
     batch["text"] = re.sub(chars_to_ignore_regex, '', batch["text"])
     
     batch["text"] = split_syllables(batch["text"])
     batch["text"] = batch["text"] + " "
     return batch
 
+def not_long_file(batch):
+    '''
+    return True if file duration is not longer than max_length=15.5s
+    '''
+    max_length = 15.5
+    if 'no_header' not in batch or not batch['no_header']:
+        return librosa.get_duration(filename=batch['path']) < max_length
+    else:
+        return Path(batch['path']).stat().st_size // 2 < max_length * 16_000
 
 def map_to_array(batch, idx):
-    try:
+    '''Load audio from 'path' and resamples to 16kHz
+    - handle two type of .wav files: with header/ without header(16bit, 16kHz)
+    ## Input batch
+    - path
+    - text
+    - no_header(optional)
+
+    ## Output batch
+    - data
+    - length
+    - sampling_rate
+    - target_text
+    '''
+    if 'no_header' not in batch or not batch['no_header']:
         data, sampling_rate = librosa.load(batch['path'], sr=None)
-    except:
-        # Method 1
+
+    else:
         with open(batch['path'], 'rb') as opened_pcm_file:
             buf = opened_pcm_file.read()
             pcm_data = np.frombuffer(buf, dtype='int16')
             data = librosa.util.buf_to_float(pcm_data, 2)
             sampling_rate = 16_000
-
-        # Method 2
-        # data = np.memmap(batch['path'], dtype = 'h', mode = 'r').astype(np.float)
-        # sampling_rate = 16_000
-
-    resampled_data = librosa.resample(data,
+    
+    batch["data"] = librosa.resample(data,
                                       sampling_rate,
                                       16_000,
                                       res_type='polyphase'
                                       )
-
-    # truncate files longer than 240_000 = 15s(22 files in final_stt_2)
-    if(len(resampled_data) > 240_500):
-        print(f"Long file detected: length = {len(resampled_data)}")
-        resampled_data = resampled_data[:240_000]
-    batch['data'] = resampled_data
-    batch['length'] = len(resampled_data)
+    batch["target_text"] = batch["text"]
+    batch['length'] = len(batch["data"])
     batch['sampling_rate'] = 16_000
-    batch['target_text'] = batch['text']
-    del resampled_data, data
+    del data
 
     if (idx % 5000 == 0):
         print(idx)
         gc.collect()
     return batch
 
-
 def preprocess_dataset(batch, processor):
-    # check that all files have the correct sampling rate
+    '''
+    Normalize audio & convert tokens to ids
+    ## Input batch
+    - data
+    - sampling_rate
+    - target_text
+
+    ## Output batch
+    - input_values
+    - labels
+    '''
     assert (
         len(set(batch["sampling_rate"])) == 1
     ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
@@ -173,15 +172,28 @@ def preprocess_dataset(batch, processor):
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
 
-    del batch["target_text"], batch["data"], batch["sampling_rate"]
+    del batch["data"], batch["sampling_rate"]
     gc.collect()
     return batch
 
 
 def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
-    if args.mode == 'train':
+    '''
+    return train/val dataset or test dataset depending on args.mode
+    ## Arguments
+    - file_list : list of files. Used in test mode
+    - df : dataframe containing columns "path", "text"
+    - processor : processor to use in audio/text preprocessing
+    - args : class DataTrainingArguments
+    - val_size : validation split size (0~1)
+    - val_df : use if external dataset
 
-        set_verbosity_error()  # disable logging
+    ## Return
+    dataset object with columns
+    - input_values
+    - labels
+    '''
+    if args.mode == 'train':
 
         # Used for fast training (Only use some of the data)
         if args.split != None and args.max_split != None:
@@ -217,20 +229,18 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         train_data = load_from_disk('./train_temp')
         val_data = load_from_disk('./val_temp')
 
-        # """
         train_data = train_data.map(
-            split_and_remove_special_characters,
+            clean_and_split_syllables,
             num_proc=args.preprocessing_num_workers,
         )
         val_data = val_data.map(
-            split_and_remove_special_characters,
+            clean_and_split_syllables,
             num_proc=args.preprocessing_num_workers,
         )
-        # """
-        # print(not_kor)
-        # print(train_data[:10]['text'])
+        train_data = train_data.filter(not_long_file, num_proc=args.preprocessing_num_workers)
+        val_data = val_data.filter(not_long_file, num_proc=args.preprocessing_num_workers)
+        print(f"Number of soundfiles after filter : {len(train_data)+len(val_data)}")
 
-        # change data to array
         print("Start changing to array")
         tic = time.perf_counter()
         train_data = train_data.map(
@@ -247,28 +257,8 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         )
         toc = time.perf_counter()
         print(f"Changing to array done in {toc-tic:.1f}s")
-
-        # print("Filter long files")
-        # This is slow, but is the only way to drop rows(not truncate)
-        # tic = time.perf_counter()
-        # train_data = train_data.filter(
-        #     lambda length: [x < 240_000 for x in length],
-        #     input_columns='length',
-        #     num_proc=args.preprocessing_num_workers,
-        #     batched=True
-        # )
-        # val_data = val_data.filter(
-        #     lambda length: length < 240_000,
-        #     input_columns='length',
-        #     num_proc=args.preprocessing_num_workers,
-        #     batched=True
-        # )
-        # toc = time.perf_counter()
-        # print(f"Filter done in {toc-tic:.1f}s")
-        # """
         print("Start preprocess")
         tic = time.perf_counter()
-
         train_data = train_data.map(
             preprocess_dataset,
             batched=True,
@@ -287,14 +277,10 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         )
         toc = time.perf_counter()
         print(f"Preprocess done in {toc-tic:.1f}s")
-        # """
-
-        set_verbosity_info()
 
         return train_data, val_data
 
     else:
-        set_verbosity_error()  # disable logging
         data = pd.DataFrame({'file_name': file_list})
         print(len(data))
         data['path'] = data['file_name'].apply(
@@ -309,6 +295,4 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
             with_indices=True,
         )
         print("Finished changing to array")
-        set_verbosity_info()
-
         return test_data
