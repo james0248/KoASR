@@ -13,74 +13,136 @@ import os
 import time
 from pathlib import Path
 
+
 def init_data():
     vocab = {
-        "<pad>": 0,
-        "<unk>": 1,
-        "<s>": 2,
-        "</s>": 3,
-        "|": 4,
-        "ㄱ": 5,
-        "ㄴ": 6,
-        "ㄷ": 7,
-        "ㄹ": 8,
-        "ㅁ": 9,
-        "ㅂ": 10,
-        "ㅅ": 11,
-        "ㅇ": 12,
-        "ㅈ": 13,
-        "ㅊ": 14,
-        "ㅋ": 15,
-        "ㅌ": 16,
-        "ㅍ": 17,
-        "ㅎ": 18,
-        "ㄲ": 19,
-        "ㄸ": 20,
-        "ㅃ": 21,
-        "ㅆ": 22,
-        "ㅉ": 23,
-        "ㅏ": 24,
-        "ㅐ": 25,
-        "ㅑ": 26,
-        "ㅒ": 27,
-        "ㅓ": 28,
-        "ㅔ": 29,
-        "ㅕ": 30,
-        "ㅖ": 31,
-        "ㅗ": 32,
-        "ㅘ": 33,
-        "ㅙ": 34,
-        "ㅚ": 35,
-        "ㅛ": 36,
-        "ㅜ": 37,
-        "ㅝ": 38,
-        "ㅞ": 39,
-        "ㅟ": 40,
-        "ㅠ": 41,
-        "ㅡ": 42,
-        "ㅢ": 43,
-        "ㅣ": 44,
-        "ㄳ": 45,
-        "ㄵ": 46,
-        "ㄶ": 47,
-        "ㄺ": 48,
-        "ㄻ": 49,
-        "ㄼ": 50,
-        "ㄽ": 51,
-        "ㄾ": 52,
-        'ㄿ': 53,
-        "ㅀ": 54,
-        "ㅄ": 55,
-        ",": 56,
-        "?": 57,
-        ".": 58,
-        "!": 59,
+        "[PAD]": 0,
+        "[UNK]": 1,
+        "|": 2,
+        "ㄱ": 3,
+        "ㄴ": 4,
+        "ㄷ": 5,
+        "ㄹ": 6,
+        "ㅁ": 7,
+        "ㅂ": 8,
+        "ㅅ": 9,
+        "ㅇ": 10,
+        "ㅈ": 11,
+        "ㅊ": 12,
+        "ㅋ": 13,
+        "ㅌ": 14,
+        "ㅍ": 15,
+        "ㅎ": 16,
+        "ㄲ": 17,
+        "ㄸ": 18,
+        "ㅃ": 19,
+        "ㅆ": 20,
+        "ㅉ": 21,
+        "ㅏ": 22,
+        "ㅐ": 23,
+        "ㅑ": 24,
+        "ㅒ": 25,
+        "ㅓ": 26,
+        "ㅔ": 27,
+        "ㅕ": 28,
+        "ㅖ": 29,
+        "ㅗ": 30,
+        "ㅘ": 31,
+        "ㅙ": 32,
+        "ㅚ": 33,
+        "ㅛ": 34,
+        "ㅜ": 35,
+        "ㅝ": 36,
+        "ㅞ": 37,
+        "ㅟ": 38,
+        "ㅠ": 39,
+        "ㅡ": 40,
+        "ㅢ": 41,
+        "ㅣ": 42,
+        "ㄳ": 43,
+        "ㄵ": 44,
+        "ㄶ": 45,
+        "ㄺ": 46,
+        "ㄻ": 47,
+        "ㄼ": 48,
+        "ㄽ": 49,
+        "ㄾ": 50,
+        "ㄿ": 51,
+        "ㅀ": 52,
+        "ㅄ": 53,
+        ",": 54,
+        "?": 55,
+        ".": 56,
+        "!": 57
+
+        # "<pad>": 0,
+        # "<unk>": 1,
+        # "<s>": 2,
+        # "</s>": 3,
+        # "|": 4,
+        # "ㄱ": 5,
+        # "ㄴ": 6,
+        # "ㄷ": 7,
+        # "ㄹ": 8,
+        # "ㅁ": 9,
+        # "ㅂ": 10,
+        # "ㅅ": 11,
+        # "ㅇ": 12,
+        # "ㅈ": 13,
+        # "ㅊ": 14,
+        # "ㅋ": 15,
+        # "ㅌ": 16,
+        # "ㅍ": 17,
+        # "ㅎ": 18,
+        # "ㄲ": 19,
+        # "ㄸ": 20,
+        # "ㅃ": 21,
+        # "ㅆ": 22,
+        # "ㅉ": 23,
+        # "ㅏ": 24,
+        # "ㅐ": 25,
+        # "ㅑ": 26,
+        # "ㅒ": 27,
+        # "ㅓ": 28,
+        # "ㅔ": 29,
+        # "ㅕ": 30,
+        # "ㅖ": 31,
+        # "ㅗ": 32,
+        # "ㅘ": 33,
+        # "ㅙ": 34,
+        # "ㅚ": 35,
+        # "ㅛ": 36,
+        # "ㅜ": 37,
+        # "ㅝ": 38,
+        # "ㅞ": 39,
+        # "ㅟ": 40,
+        # "ㅠ": 41,
+        # "ㅡ": 42,
+        # "ㅢ": 43,
+        # "ㅣ": 44,
+        # "ㄳ": 45,
+        # "ㄵ": 46,
+        # "ㄶ": 47,
+        # "ㄺ": 48,
+        # "ㄻ": 49,
+        # "ㄼ": 50,
+        # "ㄽ": 51,
+        # "ㄾ": 52,
+        # 'ㄿ': 53,
+        # "ㅀ": 54,
+        # "ㅄ": 55,
+        # ",": 56,
+        # "?": 57,
+        # ".": 58,
+        # "!": 59,
     }
     os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
         json.dump(vocab, vocab_file)
 
 # Currently not in use
+
+
 def extract_all_chars(batch):
     all_text = " ".join(batch["text"])
     vocab = list(set(all_text))
@@ -96,10 +158,41 @@ def clean_and_split_syllables(batch):
 
     chars_to_ignore_regex = r'[\r\n\-\;\:\'\"\%\‘\’\“\”]'
     batch["text"] = re.sub(chars_to_ignore_regex, '', batch["text"])
-    
+
     batch["text"] = split_syllables(batch["text"])
     batch["text"] = batch["text"] + " "
     return batch
+
+
+def clean_ext(batch):
+    '''
+    preprocess text using regex & split syllables for external data
+    '''
+    batch["text"] = re.sub(pattern=r"[a-zA-Z]/|/[a-zA-Z]+",
+                           repl='', string=batch["text"])
+    batch["text"] = re.sub(pattern="\([^/()]+\)\/\([^/()]+\)",
+                           repl=lambda match: match.group(0).split('/')[1][1:-1], string=batch["text"])
+    batch["text"] = re.sub(
+        pattern=r"[₂₁…州♡~<>:‘’'“”ㆍ^`;​/+*​​=♤&@「」{}\u0200\[\]\-\\\"]", repl='', string=batch["text"])
+    batch["text"] = batch["text"].replace('%', '퍼센트')
+    batch["text"] = batch["text"].replace('フ', 'ㄱ')
+    batch["text"] = batch["text"].replace('．', '.')
+    batch["text"] = batch["text"].replace('！', '!')
+    batch["text"] = batch["text"].replace('¸', ',')
+    batch["text"] = batch["text"].replace('·', ' ')
+    batch["text"] = re.sub(pattern="[.,!?][^\s.\n0-9]",
+                           repl=lambda match: '. ' + match.group(0)[1], string=batch["text"])
+    batch["text"] = re.sub(pattern="\s+", repl=' ', string=batch["text"])
+    batch["text"] = re.sub(pattern="\s+[.]", repl='.', string=batch["text"])
+    batch["text"] = re.sub(pattern="[.]+", repl='.', string=batch["text"])
+    batch["text"] = batch["text"].strip()
+    return batch
+
+
+def split_syllables_ext(batch):
+    batch["text"] = split_syllables(batch["text"])
+    return batch
+
 
 def not_long_file(batch):
     '''
@@ -110,6 +203,21 @@ def not_long_file(batch):
         return librosa.get_duration(filename=batch['path']) < max_length
     else:
         return Path(batch['path']).stat().st_size // 2 < max_length * 16_000
+
+
+def not_bad_string(batch):
+    '''
+    return True if label is too short or contains unknown data
+    '''
+    return (re.search("[^가-힣\s.,!?]", batch["text"]) != None) or (len(batch["text"]) < 13)
+
+
+def file_exists(batch):
+    '''
+    return True if file exists in file system, in case of download errors
+    '''
+    return Path(batch['path']).is_file()
+
 
 def map_to_array(batch, idx):
     '''Load audio from 'path' and resamples to 16kHz
@@ -134,12 +242,12 @@ def map_to_array(batch, idx):
             pcm_data = np.frombuffer(buf, dtype='int16')
             data = librosa.util.buf_to_float(pcm_data, 2)
             sampling_rate = 16_000
-    
+
     batch["data"] = librosa.resample(data,
-                                      sampling_rate,
-                                      16_000,
-                                      res_type='polyphase'
-                                      )
+                                     sampling_rate,
+                                     16_000,
+                                     res_type='polyphase'
+                                     )
     batch["target_text"] = batch["text"]
     batch['length'] = len(batch["data"])
     batch['sampling_rate'] = 16_000
@@ -149,6 +257,7 @@ def map_to_array(batch, idx):
         print(idx)
         gc.collect()
     return batch
+
 
 def preprocess_dataset(batch, processor):
     '''
@@ -214,6 +323,14 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
                 df)  # THESE HAD TO BE USED VERY CAREFULLY.
             val_data = Dataset.from_pandas(
                 val_df)  # IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
+            train_data = train_data.map(
+                file_exists,
+                num_proc=args.preprocessing_num_workers,
+            )
+            val_data = val_data.map(
+                file_exists,
+                num_proc=args.preprocessing_num_workers,
+            )
         else:
             train, val = train_test_split(df, test_size=val_size)
 
@@ -229,19 +346,44 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
         train_data = load_from_disk('./train_temp')
         val_data = load_from_disk('./val_temp')
 
-        train_data = train_data.map(
-            clean_and_split_syllables,
-            num_proc=args.preprocessing_num_workers,
-        )
-        val_data = val_data.map(
-            clean_and_split_syllables,
-            num_proc=args.preprocessing_num_workers,
-        )
-        train_data = train_data.filter(not_long_file, num_proc=args.preprocessing_num_workers)
-        val_data = val_data.filter(not_long_file, num_proc=args.preprocessing_num_workers)
-        print(f"Number of soundfiles after filter : {len(train_data)+len(val_data)}")
+        print(f"Number of data before filter: {len(train_data)+len(val_data)}")
 
+        if args.load_external_data:
+            train_data = train_data.map(
+                clean_ext,
+                num_proc=args.preprocessing_num_workers,
+            )
+            val_data = val_data.map(
+                clean_ext,
+                num_proc=args.preprocessing_num_workers,
+            )
+            train_data = train_data.filter(
+                not_bad_string, num_proc=args.preprocessing_num_workers)
+            val_data = val_data.filter(
+                not_bad_string, num_proc=args.preprocessing_num_workers)
+            train_data = train_data.map(
+                split_syllables_ext,
+                num_proc=args.preprocessing_num_workers)
+            val_data = val_data.map(
+                split_syllables_ext,
+                num_proc=args.preprocessing_num_workers)
+        else:
+            train_data = train_data.map(
+                clean_and_split_syllables,
+                num_proc=args.preprocessing_num_workers,
+            )
+            val_data = val_data.map(
+                clean_and_split_syllables,
+                num_proc=args.preprocessing_num_workers,
+            )
+        train_data = train_data.filter(
+            not_long_file, num_proc=args.preprocessing_num_workers)
+        val_data = val_data.filter(
+            not_long_file, num_proc=args.preprocessing_num_workers)
+
+        print(f"Number of data after filter: {len(train_data)+len(val_data)}")
         print("Start changing to array")
+
         tic = time.perf_counter()
         train_data = train_data.map(
             map_to_array,
