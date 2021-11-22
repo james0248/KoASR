@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 import warnings
 from nsml import DATASET_PATH
+from transformers.utils.dummy_tokenizers_objects import BartTokenizerFast
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
-from download import download_kenlm, get_external_data, bind_file
 from data import init_data, prepare_dataset
-from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data
-from data import init_data, prepare_dataset
+from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data, bind_file
 from ctcdecode import CTCBeamDecoder
 import logging
 from glob import glob
@@ -34,7 +33,7 @@ from transformers import (HfArgumentParser, Trainer,
                           Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
                           Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
                           trainer_utils, TrainerCallback, AutoTokenizer,
-                          AutoModelForPreTraining, BartForConditionalGeneration)
+                          AutoModelForPreTraining, BartForConditionalGeneration, BartTokenizerFast)
 
 
 warnings.filterwarnings(action='ignore')
@@ -192,13 +191,13 @@ def predict(test_dataset):
         for i in range(out_lens.shape[0]):
             pred_str = join_jamos(decoded_strings[i])
             pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
-            # inputs = gec_tokenizer([pred_str], return_tensors='pt')
-            # res_ids = gec_model.generate(inputs['input_ids'],
-            #                              max_length=30, early_stopping=False)
-            # res_str = [gec_tokenizer.decode(
-            #     g, skip_special_tokens=True) for g in res_ids]
+            inputs = gec_tokenizer([pred_str], return_tensors='pt')
+            res_ids = gec_model.generate(inputs['input_ids'],
+                                         max_length=30, early_stopping=True)
+            res_str = [gec_tokenizer.decode(
+                g, skip_special_tokens=True) for g in res_ids]
 
-            # result_list.append(res_str[0])
+            result_list.append(res_str[0])
             result_list.append(pred_str)
         return
 
@@ -315,7 +314,7 @@ if __name__ == "__main__":
     )
     # print(model)
 
-    gec_tokenizer = AutoTokenizer.from_pretrained("hyunwoongko/kobart")
+    gec_tokenizer = BartTokenizerFast.from_pretrained("hyunwoongko/kobart")
     gec_model = BartForConditionalGeneration.from_pretrained(
         "hyunwoongko/kobart")
 

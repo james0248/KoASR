@@ -139,14 +139,14 @@ def bind_file(file):
         os.makedirs(save_dir, exist_ok=True)
         os.system(
             f"cp {str(Path(file))} {str(Path(save_dir) / (Path(file)))}")
-        print("데이터 저장 완료!")
+        print("파일 저장 완료!")
 
     def load(dir_name, *parser):
         save_dir = os.path.join(dir_name, 'checkpoint')
         print(save_dir)
         os.system(
             f"cp {str(Path(save_dir) / (Path(file)))} {str(Path(file))}")
-        print("데이터 로딩 완료!")
+        print("파일 로딩 완료!")
     nsml.bind(save=save, load=load)
 
 
@@ -157,7 +157,7 @@ def bind_dataset(train: DatasetWrapper, val: DatasetWrapper):
         os.makedirs(save_dir, exist_ok=True)
         train.dataset.to_parquet(os.path.join(save_dir, 'train_dataset'))
         val.dataset.to_parquet(os.path.join(save_dir, 'val_dataset'))
-        print("데이터 저장 완료!")
+        print("데이터셋 저장 완료!")
 
     def load(dir_name, *parser):
         save_dir = os.path.join(dir_name, 'external_data')
@@ -165,7 +165,7 @@ def bind_dataset(train: DatasetWrapper, val: DatasetWrapper):
             os.path.join(save_dir, 'train_dataset')))
         val.set_dataset(Dataset.from_parquet(
             os.path.join(save_dir, 'val_dataset')))
-        print("데이터 로딩 완료!")
+        print("데이터셋 로딩 완료!")
 
     nsml.bind(save=save, load=load)
 

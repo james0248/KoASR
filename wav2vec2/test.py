@@ -153,7 +153,7 @@ def clean_label(s: str):
     s = re.sub(pattern="\([^/()]+\)\/\([^/()]+\)",
                repl=lambda match: match.group(0).split('/')[1][1:-1], string=s)
     s = re.sub(
-        pattern=r"[₂₁…州♡~<>:‘’'“”ㆍ^`;​/+*​​=♤&@「」{}\u0200\[\]\-\\\"]", repl='', string=s)
+        pattern=r"[₂₁…州♡~<>:‘’“”ㆍ^`;​/+*​​=♤&@「」{}\u0200\[\]\-\\\"\']", repl='', string=s)
     s = s.replace('%', '퍼센트')
     s = s.replace('フ', 'ㄱ')
     s = s.replace('．', '.')
@@ -187,11 +187,13 @@ def gen_train_data():
         with open('./data/train_data.txt', 'w') as text:
             scripts = script.readlines()
             orders = order.readlines()
+            res = list(set(scripts + orders))
+            res = list(filter(lambda x: re.search(
+                '[^가-힣\s.,!?]', x) == None, res))
             res = list(map(lambda s: ' '.join(list(split_syllables(
-                s).strip().replace(' ', '|'))), list(set(scripts + orders))))
+                s).strip().replace(' ', '|'))), res))
             text.write('\n'.join(res) + '\n')
 
 
 if __name__ == "__main__":
-    # preprocess()
-    gen_train_data()
+    print(Path('./data').is_file())
