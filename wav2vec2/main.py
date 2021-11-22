@@ -126,7 +126,7 @@ class NSMLCallback(TrainerCallback):
             'processor': processor,
             'device': device,
         }
-        #nsml.save(int(state.epoch))
+        nsml.save(int(state.epoch))
 
     def on_evaluate(self, args: TrainingArguments, state: TrainerState,
                     control: TrainerControl, metrics, **kwargs):
@@ -172,36 +172,25 @@ def predict(test_dataset):
     )
 
     def map_to_result(batch):
-
         input_values = processor(
             batch["data"],
-            sampling_rate=batch["sampling_rate"],
-            return_tensors="pt").input_values.to(device)
-
+            sampling_rate=16_000,
+            return_tensors="pt", padding=True).input_values.to(device)
         with torch.no_grad():
             logits = model(input_values).logits
-
-        # pred_ids = torch.argmax(logits, dim=-1)
-        # pred_ids = remove_duplicate_tokens(pred_ids.cpu().numpy()[0],
-        #                                    processor)
-        # pred_str = join_jamos(processor.batch_decode(pred_ids))
-
+        
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
         # select best predection
-        pred_ids = beam_results[0][0][:out_lens[0][0]]
+        pred_ids = [beam_results[i][0][:out_lens[i][0]] for i in range(out_lens.shape[0])]
+        decoded_strings = processor.batch_decode(pred_ids)
 
-        decoded_str = processor.batch_decode(pred_ids)
-        pred_str = ""
-        for char in decoded_str[:-1]:
-            pred_str += " " if char == "" else char
-        if decoded_str[-1] != "":
-            pred_str += decoded_str[-1]
-        pred_str = join_jamos(pred_str)
-        pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
-        result_list.append(pred_str)
-        return None
+        for i in range(out_lens.shape[0]):
+            pred_str = join_jamos(decoded_strings[i])
+            pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
+            result_list.append(pred_str)
+        return
 
-    test_dataset.map(map_to_result)
+    test_dataset.map(map_to_result, batched=True, batch_size=8)
     return result_list
 
 
@@ -308,7 +297,7 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
-    print(model)
+    #print(model)
     
 
     bind_model(model, training_args)
