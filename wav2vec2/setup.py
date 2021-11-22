@@ -10,5 +10,6 @@ setup(name='ladder_networks',
           'librosa',
           'jiwer==2.2.0',
           'hangul_utils',
+          'gdown',
           'apex',
       ])
