@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+import warnings
+from nsml import DATASET_PATH
+from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
+from download import download_kenlm, get_external_data, bind_file
+from data import init_data, remove_duplicate_tokens, prepare_dataset
+from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data
+from data import init_data, prepare_dataset
 from ctcdecode import CTCBeamDecoder
 import logging
 from glob import glob
 import pickle
 import os
 import shutil
+from pathlib import Path
 from dataclasses import dataclass, field
 from datasets.arrow_dataset import Dataset
 
@@ -12,6 +20,7 @@ from hangul_utils import join_jamos
 import re
 from gpuinfo import get_gpu_info
 from typing import Any, Callable, Dict, List, Optional, Set, Union
+from torch import nn
 
 import nsml
 import datasets
@@ -25,14 +34,12 @@ from transformers import (HfArgumentParser, Trainer,
                           Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
                           Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
                           trainer_utils, TrainerCallback, AutoTokenizer,
-                          AutoModelForPreTraining)
+                          AutoModelForPreTraining, BartForConditionalGeneration)
 
-from data import init_data, prepare_dataset
-from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data
-from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
-from nsml import DATASET_PATH
+<< << << < HEAD
+== == == =
+>>>>>> > e75ea8a(Make external data download always)
 
-import warnings
 
 warnings.filterwarnings(action='ignore')
 
@@ -144,7 +151,7 @@ class NSMLCallback(TrainerCallback):
             report_dict = {
                 'step': state.epoch,
                 'train_loss': logs['loss'],
-                'learning_rate' : logs['learning_rate'], 
+                'learning_rate': logs['learning_rate'],
             }
             nsml.report(**report_dict)
 
@@ -160,8 +167,9 @@ def predict(test_dataset):
     result_list = []
     decoder = CTCBeamDecoder(
         list(processor.tokenizer.get_vocab().keys()),
+        # model_path='./model.arpa',
         model_path=None,
-        alpha=0,
+        alpha=0.5,
         beta=0,
         cutoff_top_n=40,
         cutoff_prob=1.0,
@@ -178,15 +186,23 @@ def predict(test_dataset):
             return_tensors="pt", padding=True).input_values.to(device)
         with torch.no_grad():
             logits = model(input_values).logits
-        
+
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
         # select best predection
-        pred_ids = [beam_results[i][0][:out_lens[i][0]] for i in range(out_lens.shape[0])]
+        pred_ids = [beam_results[i][0][:out_lens[i][0]]
+            for i in range(out_lens.shape[0])]
         decoded_strings = processor.batch_decode(pred_ids)
 
         for i in range(out_lens.shape[0]):
             pred_str = join_jamos(decoded_strings[i])
             pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
+            # inputs = gec_tokenizer([pred_str], return_tensors='pt')
+            # res_ids = gec_model.generate(inputs['input_ids'],
+            #                              max_length=30, early_stopping=False)
+            # res_str = [gec_tokenizer.decode(
+            #     g, skip_special_tokens=True) for g in res_ids]
+
+            # result_list.append(res_str[0])
             result_list.append(pred_str)
         return
 
@@ -276,15 +292,22 @@ if __name__ == "__main__":
     processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                   tokenizer=tokenizer)
 
+<< << << < HEAD
     if data_args.load_external_data:
         get_external_data(processor, args=data_args)
         shutil.rmtree('./train_temp')
         shutil.rmtree('./val_temp')
         print('Cleaning done!')
         exit(0)
+== == == =
+>>>>>> > e75ea8a(Make external data download always)
     if data_args.mode == 'test':
-        pass
-        # download_kenlm()
+        path = Path('./model.arpa')
+        bind_file(str(path))
+        print("Loading kenlm...")
+        nsml.load(checkpoint='1000', session='nia1030/final_stt_1/211')
+        print("Loading complete!")
+
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -297,8 +320,14 @@ if __name__ == "__main__":
         layerdrop=model_args.layerdrop,
         vocab_size=len(processor.tokenizer),
     )
-    #print(model)
-    
+<< << << < HEAD
+    # print(model)
+
+== == == =
+    gec_tokenizer = AutoTokenizer.from_pretrained("hyunwoongko/kobart")
+    gec_model = BartForConditionalGeneration.from_pretrained(
+        "hyunwoongko/kobart")
+>>>>>> > e75ea8a(Make external data download always)
 
     bind_model(model, training_args)
     if model_args.pause:
@@ -319,18 +348,19 @@ if __name__ == "__main__":
         val_dataset = Dataset.from_dict({})
 
         if data_args.use_external_data:
-            train_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
-            val_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
-            bind_dataset(train_dataset_wrapper, val_dataset_wrapper)
-            print("Loading saved external data...")
-            nsml.load(checkpoint='1000', session='nia1030/final_stt_1/122')
-            train_dataset = train_dataset_wrapper.dataset
-            val_dataset = val_dataset_wrapper.dataset
+            train_dataset, val_dataset = get_external_data(
+                processor, data_args)
 
         else:
             file_list, label = path_loader(DATASET_PATH)
             if model_args.data_type == 2:
-                label['no_header'] = label['file_name'].apply(lambda row: int(row[3:])<118681)
+<< << << < HEAD
+                label['no_header'] = label['file_name'].apply(
+                    lambda row: int(row[3:]) < 118681)
+== == == =
+                label = label[label['file_name'].apply(
+                    lambda row: int(row[3:]) >= 118681)]
+>>>>>> > e75ea8a(Make external data download always)
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
@@ -374,7 +404,7 @@ if __name__ == "__main__":
         # lr_scheduler = transformers.optimization.AdafactorSchedule(optimizer)
 
         optimizer = torch.optim.AdamW(model.parameters(),
-         lr = training_args.learning_rate, amsgrad=True)
+                                      lr=training_args.learning_rate, amsgrad=True)
         lr_scheduler = None
 
         trainer = Trainer(
@@ -386,9 +416,7 @@ if __name__ == "__main__":
             eval_dataset=val_dataset,
             tokenizer=processor.feature_extractor,
             callbacks=[NSMLCallback],
-            optimizers=(optimizer,
-                        lr_scheduler
-            )
+            optimizers=(optimizer, lr_scheduler)
         )
 
         print("Training start")
@@ -397,7 +425,7 @@ if __name__ == "__main__":
         except Exception as error:
             logging.exception(error)
             print('error occured')
-            
+
         print("Training done!")
         # clear disk
         train_dataset.cleanup_cache_files()
