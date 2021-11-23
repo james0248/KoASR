@@ -115,11 +115,13 @@ val_names = [
 # ]
 # train_ids = [
 #     "1t_bfjUmeCxV4S8SgpfugzCNFauMTIyRE",
-#     "1WCKh9-E06l2m_sf3gINTZ9H_xljECUxY"
+#     "1WCKh9-E06l2m_sf3gINTZ9H_xljECUxY",
+#     # "1dJqagEaXTUihM02wruZEPhZSQcpXeJMC"
 # ]
 # train_names = [
 #     "train.tar.gz",
-#     "label.tar.gz"
+#     "label.tar.gz",
+#     # "extra_label.tar.gz"
 # ]
 
 
@@ -341,19 +343,29 @@ def get_external_data(processor, args):
 
     train_dataset, val_dataset = prepare_dataset(
         None, train_df, processor, args, val_df=val_df)
-
     print("Changing to dataset done.")
+
+    print("Cleaning data...")
+    shutil.rmtree('./data')
+    print("Cleaning done!")
+
     return train_dataset, val_dataset
 
 
 def download_kenlm():
-    id = '1o7Z8mCTgoI5a2zqbjEh6Yp-GUilCDLaV'
-    path = Path('./model.arpa')
-    gdown.download(id=id, output=str(path), use_cookies=False)
-    print("Download complete!")
+    id6 = '1hARkNXFOFiHcy9DVWV6olwodWj0xJX7H'
+    id10 = '1talCLBaHYLpkIrPMfff8Cm2ETTfBQYsE'
+    path6 = Path('./model6.arpa')
+    path10 = Path('./model10.arpa')
+    gdown.download(id=id6, output=str(path6), use_cookies=False)
+    gdown.download(id=id10, output=str(path10), use_cookies=False)
+    print("Download model complete!")
     print("Starting save...")
-    bind_file(str(path))
-    nsml.save(1000)
-    print("Save complete on 1000!")
-    os.system(f'rm {str(path)}')
+    bind_file(str(path6))
+    nsml.save(6)
+    bind_file(str(path10))
+    nsml.save(10)
+    print("Save complete on 6 and 10!")
+    os.system(f'rm {str(path6)}')
+    os.system(f'rm {str(path10)}')
     exit(0)
