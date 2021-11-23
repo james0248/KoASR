@@ -13,6 +13,7 @@ import pickle
 import os
 import shutil
 from pathlib import Path
+import time
 from dataclasses import dataclass, field
 from datasets.arrow_dataset import Dataset
 
@@ -156,7 +157,7 @@ def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
 
 
-def predict(test_dataset):
+def predict(dataset,is_submit=True):
     model.to(device)
     model.eval()
 
@@ -174,15 +175,27 @@ def predict(test_dataset):
         blank_id=0,
         log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
     )
-
+    if not is_submit:
+        print(f"Inference {len(dataset)} samples")
     def map_to_result(batch):
-        input_values = processor(
-            batch["data"],
-            sampling_rate=16_000,
-            return_tensors="pt", padding=True).input_values.to(device)
-        with torch.no_grad():
-            logits = model(input_values).logits
+        if is_submit:
+            input_values = processor(
+                batch["data"],
+                padding=True,
+                sampling_rate=16_000,
+                return_tensors="pt"
+            ).input_values.to(device)
+        else:
+            input_features = [{"input_values": x} for x in batch["input_values"]]
+            input_values = processor.pad(
+                input_features,
+                padding=True,
+                pad_to_multiple_of=128,
+                return_tensors="pt",
+            ).input_values.to(device)
 
+        with torch.no_grad():
+                logits = model(input_values).logits
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
         # select best predection
         pred_ids = [beam_results[i][0][:out_lens[i][0]]
@@ -192,18 +205,34 @@ def predict(test_dataset):
         for i in range(out_lens.shape[0]):
             pred_str = join_jamos(decoded_strings[i])
             pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
-            # inputs = gec_tokenizer([pred_str], return_tensors='pt')
-            # res_ids = gec_model.generate(inputs['input_ids'],
-            #                              max_length=30, early_stopping=False)
-            # res_str = [gec_tokenizer.decode(
-            #     g, skip_special_tokens=True) for g in res_ids]
-
-            # result_list.append(res_str[0])
             result_list.append(pred_str)
         return
 
-    test_dataset.map(map_to_result, batched=True, batch_size=8)
-    return result_list
+    gec_result_list = []
+    def apply_gec():
+        for pred_str in result_list:
+            inputs = gec_tokenizer([pred_str], return_tensors='pt')
+            res_ids = gec_model.generate(
+                inputs['input_ids'],
+                max_length=30,
+                no_repeat_ngram_size=2,
+                early_stopping=True
+            )
+            res_str = [gec_tokenizer.decode(
+                g, skip_special_tokens=True) for g in res_ids]
+
+            gec_result_list.append(res_str[0])
+    tic = time.perf_counter()
+    dataset.map(map_to_result, batched=True, batch_size=8)
+    toc = time.perf_counter()
+    if not is_submit: 
+        print(f"Wav2Vec took {toc-tic:.1f}s")
+    tic = time.perf_counter()
+    apply_gec()
+    toc = time.perf_counter()
+    if not is_submit:
+        print(f"gec took {toc-tic:.1f}s")
+    return gec_result_list
 
 
 def bind_model(model, parser):
@@ -328,8 +357,8 @@ if __name__ == "__main__":
             print("No pretrained model yet")
             # nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
         elif model_args.data_type == 2:
-            print("No pretrained model yet")
-            # nsml.load(checkpoint='4', session='nia1030/final_stt_1/188')
+            # print("No pretrained model yet")
+            nsml.load(checkpoint='4', session='nia1030/final_stt_1/188')
         # nsml.save(0)
         # exit()
 
@@ -354,7 +383,12 @@ if __name__ == "__main__":
         print("Finished dataset preparation")
 
         # print(train_dataset[0])
-
+        # tic = time.perf_counter()
+        # pred = predict(val_dataset, is_submit=False)
+        # toc = time.perf_counter()
+        # print(f"Inference took {toc-tic:.1f}s")
+        # print(pred)
+        # exit(0)
         bind_model(model, training_args)
 
         wer_metric = datasets.load_metric("wer")
