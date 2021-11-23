@@ -2,10 +2,8 @@
 import warnings
 from nsml import DATASET_PATH
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
-from download import download_kenlm, get_external_data, bind_file
 from data import init_data, prepare_dataset
-from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data
-from data import init_data, prepare_dataset
+from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data, bind_file
 from ctcdecode import CTCBeamDecoder
 import logging
 from glob import glob
@@ -35,7 +33,7 @@ from transformers import (HfArgumentParser, Trainer,
                           Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
                           Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
                           trainer_utils, TrainerCallback, AutoTokenizer,
-                          AutoModelForPreTraining, BartForConditionalGeneration)
+                          AutoModelForPreTraining, BartForConditionalGeneration, BartTokenizerFast)
 
 
 warnings.filterwarnings(action='ignore')
@@ -344,7 +342,7 @@ if __name__ == "__main__":
     )
     # print(model)
 
-    gec_tokenizer = AutoTokenizer.from_pretrained("hyunwoongko/kobart")
+    gec_tokenizer = BartTokenizerFast.from_pretrained("hyunwoongko/kobart")
     gec_model = BartForConditionalGeneration.from_pretrained(
         "hyunwoongko/kobart")
 
