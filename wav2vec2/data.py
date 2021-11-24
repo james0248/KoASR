@@ -31,7 +31,7 @@ def init_data():
         "ㅒ": 27, "ㅓ": 28, "ㅔ": 29, "ㅕ": 30, "ㅖ": 31, "ㅗ": 32, "ㅘ": 33, "ㅙ": 34, "ㅚ": 35,
         "ㅛ": 36, "ㅜ": 37, "ㅝ": 38, "ㅞ": 39, "ㅟ": 40, "ㅠ": 41, "ㅡ": 42, "ㅢ": 43, "ㅣ": 44,
         "ㄳ": 45, "ㄵ": 46, "ㄶ": 47, "ㄺ": 48, "ㄻ": 49, "ㄼ": 50, "ㄽ": 51, "ㄾ": 52, 'ㄿ': 53,
-        "ㅀ": 54, "ㅄ": 55, ",": 56, "?": 57, ".": 58, "!": 59,
+        "ㅀ": 54, "ㅄ": 55, ",": 56, "?": 57, ".": 58, "!": 59, "~": 60,
     }
     os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
@@ -120,7 +120,7 @@ def not_long_or_short_string(batch):
     '''
     return True if label is to short or long
     '''
-    return len(batch["text"]) < 11 or len(batch["text"]) > 50
+    return 10 < len(batch["text"])
 
 
 def file_exists(batch):

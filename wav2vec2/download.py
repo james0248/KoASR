@@ -116,12 +116,12 @@ val_names = [
 # train_ids = [
 #     "1t_bfjUmeCxV4S8SgpfugzCNFauMTIyRE",
 #     "1WCKh9-E06l2m_sf3gINTZ9H_xljECUxY",
-#     # "1dJqagEaXTUihM02wruZEPhZSQcpXeJMC"
+#     "1dJqagEaXTUihM02wruZEPhZSQcpXeJMC"
 # ]
 # train_names = [
 #     "train.tar.gz",
 #     "label.tar.gz",
-#     # "extra_label.tar.gz"
+#     "extra_label.tar.gz"
 # ]
 
 
