@@ -10,6 +10,7 @@ import logging
 from glob import glob
 import pickle
 import os
+import time
 import shutil
 from pathlib import Path
 import time
@@ -27,6 +28,7 @@ import datasets
 import numpy as np
 import pandas as pd
 import torch
+import transformers
 from packaging import version
 from transformers.trainer_callback import TrainerControl, TrainerState
 
@@ -140,6 +142,21 @@ class NSMLCallback(TrainerCallback):
             'cer': metrics['eval_cer'],
         }
         nsml.report(**report_dict)
+        global gec_train_data
+        global gec_val_data
+        gec_train_dataset = DatasetWrapper(
+            Dataset.from_dict(gec_train_data))
+        gec_val_dataset = DatasetWrapper(Dataset.from_dict(gec_val_data))
+        bind_dataset(gec_train_dataset, gec_val_dataset)
+        nsml.save(1000+int(state.epoch))
+        bind_model(model, training_args)
+        try:
+            print(gec_train_dataset.dataset[:5])
+            print(gec_val_dataset.dataset[:5])
+        except:
+            pass
+        gec_train_data = {'noise': [], 'orig': []}
+        gec_val_data = {'noise': [], 'orig': []}
 
     def on_log(self, args: TrainingArguments, state: TrainerState,
                control: TrainerControl, logs=None, **kwargs):
@@ -152,11 +169,99 @@ class NSMLCallback(TrainerCallback):
             nsml.report(**report_dict)
 
 
+class Wav2VecCTCTrainer(Trainer):
+    def training_step(
+        self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]
+    ) -> torch.Tensor:
+
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        if self.use_amp:
+            with autocast():
+                loss = self.compute_loss(model, inputs)
+        else:
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+
+        if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
+            # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
+            loss = loss / self.args.gradient_accumulation_steps
+
+        if self.use_amp:
+            self.scaler.scale(loss).backward()
+        elif self.use_apex:
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        elif self.deepspeed:
+            # loss gets scaled under gradient_accumulation_steps in deepspeed
+            loss = self.deepspeed.backward(loss)
+        else:
+            loss.backward()
+
+        return loss.detach()
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """
+        How the loss is computed by Trainer. By default, all models return the loss in the first element.
+        Subclass and override for custom behavior.
+        """
+        if "labels" in inputs:
+            labels = inputs["labels"]
+        else:
+            labels = None
+        outputs = model(**inputs)
+
+        # --------------- For future model training ------------------ #
+        global gec_train_data
+        global gec_val_data
+        logits = outputs.logits
+        pred_ids = np.argmax(logits.clone().detach().cpu(), axis=-1)
+        decoded_strings = processor.batch_decode(pred_ids)
+        decoded_labels = processor.batch_decode(labels)
+        for noise, orig in zip(decoded_strings, decoded_labels):
+            pred_str = join_jamos(noise)
+            pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
+            orig_str = join_jamos(orig)
+            orig_str = re.sub('<unk>|<s>|<\/s>', '', orig_str)
+            gec_train_data['noise'].append(
+                pred_str + processor.tokenizer.eos_token)
+            gec_train_data['orig'].append(
+                orig_str + processor.tokenizer.eos_token)
+        # beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
+        # # select best predection
+        # pred_ids = [beam_results[i][0][:out_lens[i][0]]
+        #             for i in range(out_lens.shape[0])]
+        # decoded_strings = processor.batch_decode(pred_ids)
+        # decoded_labels = processor.batch_decode(labels)
+        # for noise, orig in zip(decoded_strings, decoded_labels):
+        #     pred_str = join_jamos(noise)
+        #     pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
+        #     orig_str = join_jamos(orig)
+        #     orig_str = re.sub('<unk>|<s>|<\/s>', '', orig_str)
+        #     gec_train_data['noise'].append(
+        #         pred_str + processor.tokenizer.eos_token)
+        #     gec_train_data['orig'].append(
+        #         orig_str + processor.tokenizer.eos_token)
+        # --------------- For future model training ------------------ #
+
+        # Save past state if it exists
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        # We don't use .loss here since the model may return tuples instead of ModelOutput.
+        loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+        return (loss, outputs) if return_outputs else loss
+
+
 def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
 
 
-def predict(dataset,is_submit=True):
+def predict(dataset, is_submit=True):
     model.to(device)
     model.eval()
 
@@ -165,17 +270,18 @@ def predict(dataset,is_submit=True):
         list(processor.tokenizer.get_vocab().keys()),
         # model_path='./model.arpa',
         model_path=None,
-        alpha=0.5,
+        alpha=0,
         beta=0,
-        cutoff_top_n=40,
-        cutoff_prob=1.0,
-        beam_width=100,
-        num_processes=4,
+        cutoff_top_n=30,
+        cutoff_prob=0.8,
+        beam_width=40,
+        num_processes=8,
         blank_id=0,
         log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
     )
     if not is_submit:
         print(f"Inference {len(dataset)} samples")
+
     def map_to_result(batch):
         if is_submit:
             input_values = processor(
@@ -185,7 +291,8 @@ def predict(dataset,is_submit=True):
                 return_tensors="pt"
             ).input_values.to(device)
         else:
-            input_features = [{"input_values": x} for x in batch["input_values"]]
+            input_features = [{"input_values": x}
+                              for x in batch["input_values"]]
             input_values = processor.pad(
                 input_features,
                 padding=True,
@@ -194,7 +301,7 @@ def predict(dataset,is_submit=True):
             ).input_values.to(device)
 
         with torch.no_grad():
-                logits = model(input_values).logits
+            logits = model(input_values).logits
         beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
         # select best predection
         pred_ids = [beam_results[i][0][:out_lens[i][0]]
@@ -206,8 +313,15 @@ def predict(dataset,is_submit=True):
             pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
             result_list.append(pred_str)
         return
+    tic = time.perf_counter()
+    dataset.map(map_to_result, batched=True, batch_size=8)
+    toc = time.perf_counter()
+    print(f"Wav2Vec took {toc-tic:.1f}s")
+
+    return result_list
 
     gec_result_list = []
+
     def apply_gec():
         for pred_str in result_list:
             inputs = gec_tokenizer([pred_str], return_tensors='pt')
@@ -222,15 +336,9 @@ def predict(dataset,is_submit=True):
 
             gec_result_list.append(res_str[0])
     tic = time.perf_counter()
-    dataset.map(map_to_result, batched=True, batch_size=8)
-    toc = time.perf_counter()
-    if not is_submit: 
-        print(f"Wav2Vec took {toc-tic:.1f}s")
-    tic = time.perf_counter()
     apply_gec()
     toc = time.perf_counter()
-    if not is_submit:
-        print(f"gec took {toc-tic:.1f}s")
+    print(f"gec took {toc-tic:.1f}s")
     return gec_result_list
 
 
@@ -243,7 +351,7 @@ def bind_model(model, parser):
         with open(os.path.join(dir_name, "dict_for_infer"), "wb") as f:
             pickle.dump(dict_for_infer, f)
 
-        print("저장 완료!")
+        print("모델 저장 완료!")
 
     # 저장한 모델을 불러올 수 있는 함수입니다.
     def load(dir_name, *parser):
@@ -254,7 +362,7 @@ def bind_model(model, parser):
 
         model.load_state_dict(dict_for_infer['model'])
 
-        print("로딩 완료!")
+        print("모델 로딩 완료!")
 
     def infer(test_path, **kwparser):
         test_file_list = path_loader(test_path)
@@ -264,6 +372,10 @@ def bind_model(model, parser):
             test_dataset = prepare_dataset(test_file_list, None, processor,
                                         data_args)
             result_list = predict(test_dataset)
+            try:
+                os.system(f'rm ./model.arpa')
+            else:
+                pass
             prob = [1] * len(result_list)
 
             # DONOTCHANGE: They are reserved for nsml
@@ -292,6 +404,8 @@ def path_loader(root_path):
 
 
 if __name__ == "__main__":
+    # os.system('df -h')
+    # exit(0)
     parser = HfArgumentParser(
         (ModelArguments, DataTrainingArguments, TrainingArguments))
 
@@ -316,19 +430,35 @@ if __name__ == "__main__":
 
     processor = Wav2Vec2Processor(feature_extractor=feature_extractor,
                                   tokenizer=tokenizer)
+    # train = DatasetWrapper(Dataset.from_dict({}))
+    # val = DatasetWrapper(Dataset.from_dict({}))
+    # bind_dataset(train, val)
+    # nsml.load(checkpoint='1002', session='nia1030/final_stt_1/291')
+    # print(len(train.dataset))
+    # print(len(val.dataset))
 
-    if data_args.load_external_data:
-        get_external_data(processor, args=data_args)
-        shutil.rmtree('./train_temp')
-        shutil.rmtree('./val_temp')
-        print('Cleaning done!')
-        exit(0)
-    if data_args.mode == 'test':
-        path = Path('./model.arpa')
-        bind_file(str(path))
-        print("Loading kenlm...")
-        nsml.load(checkpoint='1000', session='nia1030/final_stt_1/211')
-        print("Loading complete!")
+    # exit(0)
+
+    decoder = CTCBeamDecoder(
+        list(processor.tokenizer.get_vocab().keys()),
+        # model_path='./model.arpa',
+        model_path=None,
+        alpha=0,
+        beta=0,
+        cutoff_top_n=1,
+        cutoff_prob=1.0,
+        beam_width=1,
+        num_processes=8,
+        blank_id=0,
+        log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
+    )
+
+    # if data_args.mode == 'test':
+    #     path = Path('./model.arpa')
+    #     bind_file(str(path))
+    #     print("Loading kenlm...")
+    #     nsml.load(checkpoint='6', session='nia1030/final_stt_1/260')
+    #     print("Loading complete!")
 
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
@@ -354,16 +484,19 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
-            print("No pretrained model yet")
-            # nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
+            print("Loading pretrained model with external data")
+            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
         elif model_args.data_type == 2:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint='4', session='nia1030/final_stt_1/188')
+            print("Loading pretrained model with external data")
+            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
         elif model_args.data_type == 3:
-            # print("No pretrained model yet")
-            nsml.load(checkpoint = '4', session = 'nia1030/final_stt_1/188')
+            print("Loading pretrained model with external data")
+            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
+
         # nsml.save(0)
         # exit()
+        gec_train_data = {'noise': [], 'orig': []}
+        gec_val_data = {'noise': [], 'orig': []}
 
         print("Dataset preparation begin!")
         train_dataset = Dataset.from_dict({})
@@ -388,13 +521,14 @@ if __name__ == "__main__":
                                                          args=data_args)
         print("Finished dataset preparation")
 
-        # print(train_dataset[0])
-        # tic = time.perf_counter()
+        # import time
+        # tic = time.time()
         # pred = predict(val_dataset, is_submit=False)
-        # toc = time.perf_counter()
+        # toc = time.time()
         # print(f"Inference took {toc-tic:.1f}s")
         # print(pred)
         # exit(0)
+
         bind_model(model, training_args)
 
         wer_metric = datasets.load_metric("wer")
@@ -409,17 +543,48 @@ if __name__ == "__main__":
 
             pred.label_ids[pred.label_ids ==
                            -100] = processor.tokenizer.pad_token_id
-
             pred_str = processor.batch_decode(pred_ids)
             # we do not want to group tokens when computing the metrics
             label_str = processor.batch_decode(pred.label_ids,
                                                group_tokens=False)
+
             print(f"pred : {[join_jamos(x) for x in pred_str[:5]]}")
             print(f"label : {[join_jamos(x) for x in label_str[:5]]}")
             wer = wer_metric.compute(predictions=pred_str,
                                      references=label_str)
             cer = cer_metric.compute(predictions=pred_str,
                                      references=label_str)
+
+            noise = [re.sub('<unk>|<s>|<\/s>', '', x) for x in pred_str]
+            noise = [join_jamos(x)
+                     + processor.tokenizer.eos_token for x in noise]
+            orig = [re.sub('<unk>|<s>|<\/s>', '', x) for x in label_str]
+            orig = [join_jamos(x)
+                    + processor.tokenizer.eos_token for x in orig]
+            gec_val_data['noise'].extend(noise)
+            gec_val_data['orig'].extend(orig)
+            # --------------- For future model training ------------------ #
+            # logits = pred_logits
+            # logits = np.array_split(logits, max(
+            #     len(logits) // data_args.cpu_batch_size, 1))
+            # for logit in logits:
+            #     beam_results, beam_score, timestep, out_lens = decoder.decode(
+            #         torch.from_numpy(logit))
+            #     # select best predection
+            #     pred_ids = [beam_results[i][0][:out_lens[i][0]]
+            #                 for i in range(out_lens.shape[0])]
+            #     decoded_strings = processor.batch_decode(pred_ids)
+            #     for noise_str, orig_str in zip(decoded_strings, label_str):
+            #         pred = join_jamos(noise_str)
+            #         pred = re.sub('<unk>|<s>|<\/s>', '', pred)
+            #         orig = join_jamos(orig_str)
+            #         orig = re.sub('<unk>|<s>|<\/s>', '', orig)
+            #         gec_val_data['noise'].append(
+            #             pred + processor.tokenizer.eos_token)
+            #         gec_val_data['orig'].append(
+            #             orig + processor.tokenizer.eos_token)
+            # --------------- For future model training ------------------ #
+
             return {"wer": wer, "cer": cer}
 
         if model_args.freeze_feature_extractor:
@@ -430,9 +595,17 @@ if __name__ == "__main__":
 
         optimizer = torch.optim.AdamW(model.parameters(),
                                       lr=training_args.learning_rate, amsgrad=True)
-        lr_scheduler = None
+        lr_scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(
+            transformers.AdamW(model.parameters(),
+                               lr=training_args.learning_rate),
+            num_warmup_steps=training_args.warmup_steps,
+            num_training_steps=training_args.num_train_epochs *
+            (len(train_dataset) // training_args.per_device_train_batch_size //
+             training_args.gradient_accumulation_steps // training_args.world_size),
+            num_cycles=training_args.num_train_epochs
+        )
 
-        trainer = Trainer(
+        trainer = Wav2VecCTCTrainer(
             model=model,
             data_collator=data_collator,
             args=training_args,
@@ -441,7 +614,7 @@ if __name__ == "__main__":
             eval_dataset=val_dataset,
             tokenizer=processor.feature_extractor,
             callbacks=[NSMLCallback],
-            optimizers=(optimizer, lr_scheduler)
+            optimizers=(optimizer, lr_scheduler),
         )
 
         print("Training start")

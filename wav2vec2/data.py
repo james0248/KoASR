@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import re
 import json
+import shutil
 import librosa
 from hangul_utils import split_syllables
 from sklearn.model_selection import train_test_split
@@ -32,7 +33,7 @@ def init_data():
         "ㅒ": 27, "ㅓ": 28, "ㅔ": 29, "ㅕ": 30, "ㅖ": 31, "ㅗ": 32, "ㅘ": 33, "ㅙ": 34, "ㅚ": 35,
         "ㅛ": 36, "ㅜ": 37, "ㅝ": 38, "ㅞ": 39, "ㅟ": 40, "ㅠ": 41, "ㅡ": 42, "ㅢ": 43, "ㅣ": 44,
         "ㄳ": 45, "ㄵ": 46, "ㄶ": 47, "ㄺ": 48, "ㄻ": 49, "ㄼ": 50, "ㄽ": 51, "ㄾ": 52, 'ㄿ': 53,
-        "ㅀ": 54, "ㅄ": 55, ",": 56, "?": 57, ".": 58, "!": 59,
+        "ㅀ": 54, "ㅄ": 55, ",": 56, "?": 57, ".": 58, "!": 59, "~": 60,
     }
     os.makedirs('./kowav-processor', exist_ok=True)
     with open('./kowav-processor/vocab.json', 'w') as vocab_file:
@@ -95,7 +96,7 @@ def clean_text_ext(batch):
 
 
 def split_syllables_text(batch):
-    batch["text"] = split_syllables(batch["text"])
+    batch["text"] = split_syllables(batch["text"]) + '</s>'
     return batch
 
 
@@ -121,7 +122,7 @@ def not_long_or_short_string(batch):
     '''
     return True if label is not to short or long
     '''
-    return not (len(batch["text"]) < 11 or len(batch["text"]) > 50)
+    return 10 < len(batch["text"])
 
 
 def file_exists(batch):
@@ -134,19 +135,20 @@ def file_exists(batch):
 def map_to_array(batch, idx):
     '''Load audio from 'path' and resamples to 16kHz
     - handle two type of .wav files: with header/ without header(16bit, 16kHz)
-    ## Input batch
+    # Input batch
     - path
     - text
     - no_header(optional)
 
-    ## Output batch
+    # Output batch
     - data
     - length
     - sampling_rate
     - target_text
     '''
     if 'no_header' not in batch or not batch['no_header']:
-        data, sampling_rate = librosa.load(batch['path'], sr=None)
+        data, sampling_rate = librosa.load(
+            batch['path'], sr=None)
 
     else:
         with open(batch['path'], 'rb') as opened_pcm_file:
@@ -174,12 +176,12 @@ def map_to_array(batch, idx):
 def preprocess_dataset(batch, processor):
     '''
     Normalize audio & convert tokens to ids
-    ## Input batch
+    # Input batch
     - data
     - sampling_rate
     - target_text
 
-    ## Output batch
+    # Output batch
     - input_values
     - labels
     '''
@@ -187,8 +189,20 @@ def preprocess_dataset(batch, processor):
         len(set(batch["sampling_rate"])) == 1
     ), f"Make sure all inputs have the same sampling rate of {processor.feature_extractor.sampling_rate}."
 
-    batch["input_values"] = processor(
+    input_values = processor(
         batch["data"], sampling_rate=batch["sampling_rate"][0]).input_values
+    if not isinstance(input_values[0], np.ndarray):
+        batch["input_values"] = [np.asarray(
+            array, dtype=np.float16) for array in input_values]
+    elif (
+        not isinstance(input_values, np.ndarray)
+        and isinstance(input_values[0], np.ndarray)
+        and input_values[0].dtype is not np.dtype(np.float16)
+    ):
+        batch["input_values"] = [array.astype(
+            np.float16) for array in input_values]
+    elif isinstance(input_values, np.ndarray) and input_values.dtype is not np.dtype(np.float16):
+        batch["input_values"] = input_values.astype(np.float16)
 
     with processor.as_target_processor():
         batch["labels"] = processor(batch["target_text"]).input_ids
@@ -198,10 +212,10 @@ def preprocess_dataset(batch, processor):
     return batch
 
 
-def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
+def prepare_dataset(file_list, df, processor, args, val_size=0.8, val_df=None):
     '''
     return train/val dataset or test dataset depending on args.mode
-    ## Arguments
+    # Arguments
     - file_list : list of files. Used in test mode
     - df : dataframe containing columns "path", "text"
     - processor : processor to use in audio/text preprocessing
@@ -209,7 +223,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
     - val_size : validation split size (0~1)
     - val_df : use if external dataset
 
-    ## Return
+    # Return
     dataset object with columns
     - input_values
     - labels
@@ -316,6 +330,14 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
             num_proc=args.preprocessing_num_workers,
             with_indices=True,
         )
+
+        try:
+            print("Cleaning data...")
+            shutil.rmtree('./data')
+            print("Cleaning done!")
+        except:
+            pass
+
         toc = time.perf_counter()
         print(f"Changing to array done in {toc-tic:.1f}s")
         print("Start preprocess")
@@ -326,7 +348,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
             num_proc=args.preprocessing_num_workers,
             fn_kwargs={'processor': processor},
             writer_batch_size=args.writer_batch_size,
-            batch_size=args.writer_batch_size
+            batch_size=args.writer_batch_size,
         )
         val_data = val_data.map(
             preprocess_dataset,

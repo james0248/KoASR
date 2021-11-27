@@ -14,11 +14,11 @@ from datasets import Dataset
 from data import prepare_dataset
 
 train_ids = [
-    "1mAxVgZYFZYwgZS92c7qzOtCEM-5REEHv",
-    "1m5uxPJxdVHSdMQsZpIdeLwlXt3TxtLxJ",
-    "1M0f9RCzuJYf_jTOebda7_4YQunGsbinS",
-    "1sdLfEsbPC1-YJVCc2ZNMIZWxzZd4ILwJ",
-    "1HVG7pSKyBc0DpqudEMbrlXZ9pjnqD18l",
+    # "1mAxVgZYFZYwgZS92c7qzOtCEM-5REEHv",
+    # "1m5uxPJxdVHSdMQsZpIdeLwlXt3TxtLxJ",
+    # "1M0f9RCzuJYf_jTOebda7_4YQunGsbinS",
+    # "1sdLfEsbPC1-YJVCc2ZNMIZWxzZd4ILwJ",
+    # "1HVG7pSKyBc0DpqudEMbrlXZ9pjnqD18l",
     "1TcDIL4BncyvAdJtNCl5o4FKUZrT5YnAa",
     "1NgA40b13DqaqYYPdntKUPfbeVUVnFd62",
     "1Vi7VX9DhEtfNVtWCvr0M985-gyfBatjB",
@@ -48,11 +48,11 @@ train_ids = [
     "1DNyvu2dkgpawjYxrYq9Tomrm_4SxOihF",
 ]
 train_names = [
-    "train_broadcast_01.tar.gz",
-    "train_broadcast_02.tar.gz",
-    "train_broadcast_03.tar.gz",
-    "train_broadcast_04.tar.gz",
-    "train_broadcast_05.tar.gz",
+    # "train_broadcast_01.tar.gz",
+    # "train_broadcast_02.tar.gz",
+    # "train_broadcast_03.tar.gz",
+    # "train_broadcast_04.tar.gz",
+    # "train_broadcast_05.tar.gz",
     "train_dialog_01.tar.gz",
     "train_dialog_02.tar.gz",
     "train_dialog_03.tar.gz",
@@ -82,7 +82,7 @@ train_names = [
     "train_weather_03.tar.gz",
 ]
 val_ids = [
-    "1HAX3DmFKRXwFpi1iCNJVI1ysf_ZC_Vet",
+    # "1HAX3DmFKRXwFpi1iCNJVI1ysf_ZC_Vet",
     "1i7cgTei6nHEZN-rEy4_YXuyJ5vg08ego",
     "1NvmR9kNXyK35st5XDmpLycKrlPNzbqG9",
     "1WM7Ba0bLAKYmdeJRx3A9kbnityEEBL9O",
@@ -93,7 +93,7 @@ val_ids = [
     "17V1wgv9y7LoWcgLx0tnDsjsOpptYDcQC",
 ]
 val_names = [
-    "val_broadcast_01.tar.gz",
+    # "val_broadcast_01.tar.gz",
     "val_dialog_01.tar.gz",
     "val_economy_01.tar.gz",
     "val_hobby_01.tar.gz",
@@ -116,12 +116,12 @@ val_names = [
 # train_ids = [
 #     "1t_bfjUmeCxV4S8SgpfugzCNFauMTIyRE",
 #     "1WCKh9-E06l2m_sf3gINTZ9H_xljECUxY",
-#     # "1dJqagEaXTUihM02wruZEPhZSQcpXeJMC"
+#     "1dJqagEaXTUihM02wruZEPhZSQcpXeJMC"
 # ]
 # train_names = [
 #     "train.tar.gz",
 #     "label.tar.gz",
-#     # "extra_label.tar.gz"
+#     "extra_label.tar.gz"
 # ]
 
 
@@ -344,10 +344,6 @@ def get_external_data(processor, args):
     train_dataset, val_dataset = prepare_dataset(
         None, train_df, processor, args, val_df=val_df)
     print("Changing to dataset done.")
-
-    print("Cleaning data...")
-    shutil.rmtree('./data')
-    print("Cleaning done!")
 
     return train_dataset, val_dataset
 
