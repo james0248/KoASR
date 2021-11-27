@@ -4,6 +4,7 @@ from nsml import DATASET_PATH
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
 from data import init_data, prepare_dataset
 from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data, bind_file
+from data_with_json import predict_dialect
 from ctcdecode import CTCBeamDecoder
 import logging
 from glob import glob
@@ -364,19 +365,23 @@ def bind_model(model, parser):
         print("모델 로딩 완료!")
 
     def infer(test_path, **kwparser):
-        device = dict_for_infer['device']
         test_file_list = path_loader(test_path)
-        test_dataset = prepare_dataset(test_file_list, None, processor,
-                                       data_args)
+        if model_args.data_type and model_args.data_type==3:
+            return [(Path(test_file).name, predict_dialect(test_file, model, processor, device)) for test_file in test_file_list]
+        else:
+            test_dataset = prepare_dataset(test_file_list, None, processor,
+                                        data_args)
+            result_list = predict(test_dataset)
+            try:
+                os.system(f'rm ./model.arpa')
+            else:
+                pass
+            prob = [1] * len(result_list)
 
-        result_list = predict(test_dataset)
-        os.system(f'rm ./model.arpa')
-        prob = [1] * len(result_list)
-
-        # DONOTCHANGE: They are reserved for nsml
-        # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
-        # return list(zip(pred.flatten(), clipped.flatten()))
-        return list(zip(prob, result_list))
+            # DONOTCHANGE: They are reserved for nsml
+            # 리턴 결과는 [(확률, 0 or 1)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 확률의 값은 영향을 미치지 않습니다
+            # return list(zip(pred.flatten(), clipped.flatten()))
+            return list(zip(prob, result_list))
 
     # DONOTCHANGE: They are reserved for nsml
     # nsml에서 지정한 함수에 접근할 수 있도록 하는 함수입니다.
@@ -484,6 +489,10 @@ if __name__ == "__main__":
         elif model_args.data_type == 2:
             print("Loading pretrained model with external data")
             nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
+        elif model_args.data_type == 3:
+            print("Loading pretrained model with external data")
+            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
+
         # nsml.save(0)
         # exit()
         gec_train_data = {'noise': [], 'orig': []}
@@ -502,6 +511,9 @@ if __name__ == "__main__":
             if model_args.data_type == 2:
                 label['no_header'] = label['file_name'].apply(
                     lambda row: int(row[3:]) < 118681)
+            if model_args.data_type == 3:
+                label['json_path'] = label['path'].apply(lambda path: str(Path(path).parent / "train_info" / Path(path).name))
+                label['path'] = label['path'].apply(lambda path: str(Path(path).parent / "wav" / Path(path).name))
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
@@ -607,6 +619,7 @@ if __name__ == "__main__":
 
         print("Training start")
         try:
+            trainer.evaluate()
             trainer.train()
         except Exception as error:
             logging.exception(error)

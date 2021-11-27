@@ -7,7 +7,8 @@ import shutil
 import librosa
 from hangul_utils import split_syllables
 from sklearn.model_selection import train_test_split
-from datasets import Dataset, load_from_disk
+from datasets import Dataset, load_from_disk, load_dataset
+from data_with_json import prepare_dataset_with_json
 
 from nsml import DATASET_PATH
 import os
@@ -112,14 +113,14 @@ def not_long_file(batch):
 
 def not_bad_string(batch):
     '''
-    return True if label contains unknown vocab
+    return False if label contains unknown vocab
     '''
     return re.search("[^가-힣\s.,!?]", batch["text"]) == None
 
 
 def not_long_or_short_string(batch):
     '''
-    return True if label is to short or long
+    return True if label is not to short or long
     '''
     return 10 < len(batch["text"])
 
@@ -264,7 +265,7 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.8, val_df=None):
             val_data = Dataset.from_pandas(
                 val)  # IT LOADS EVERYTHING AFTER THIS IN MEMORY!!!
 
-        # first save this files to disk and reload
+        # first save these files to disk and reload
         train_data.save_to_disk('./train_temp')
         val_data.save_to_disk('./val_temp')
 
@@ -272,6 +273,9 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.8, val_df=None):
         val_data = load_from_disk('./val_temp')
 
         print(f"Number of data before filter: {len(train_data)+len(val_data)}")
+        
+        if "json_path" in train_data.column_names:
+            return prepare_dataset_with_json(train_data,val_data,args,processor)
 
         if args.use_external_data:
             train_data = train_data.map(
