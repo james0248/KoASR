@@ -143,18 +143,17 @@ class NSMLCallback(TrainerCallback):
         nsml.report(**report_dict)
         global gec_train_data
         global gec_val_data
-        if state.epoch > 1:
-            gec_train_dataset = DatasetWrapper(
-                Dataset.from_dict(gec_train_data))
-            gec_val_dataset = DatasetWrapper(Dataset.from_dict(gec_val_data))
-            bind_dataset(gec_train_dataset, gec_val_dataset)
-            nsml.save(1000+int(state.epoch))
-            bind_model(model, training_args)
-            try:
-                print(gec_train_dataset.dataset[:5])
-                print(gec_val_dataset.dataset[:5])
-            except:
-                pass
+        gec_train_dataset = DatasetWrapper(
+            Dataset.from_dict(gec_train_data))
+        gec_val_dataset = DatasetWrapper(Dataset.from_dict(gec_val_data))
+        bind_dataset(gec_train_dataset, gec_val_dataset)
+        nsml.save(1000+int(state.epoch))
+        bind_model(model, training_args)
+        try:
+            print(gec_train_dataset.dataset[:5])
+            print(gec_val_dataset.dataset[:5])
+        except:
+            pass
         gec_train_data = {'noise': [], 'orig': []}
         gec_val_data = {'noise': [], 'orig': []}
 
@@ -218,10 +217,7 @@ class Wav2VecCTCTrainer(Trainer):
         global gec_train_data
         global gec_val_data
         logits = outputs.logits
-        beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
-        # select best predection
-        pred_ids = [beam_results[i][0][:out_lens[i][0]]
-                    for i in range(out_lens.shape[0])]
+        pred_ids = np.argmax(logits.clone().detach().cpu(), axis=-1)
         decoded_strings = processor.batch_decode(pred_ids)
         decoded_labels = processor.batch_decode(labels)
         for noise, orig in zip(decoded_strings, decoded_labels):
@@ -233,10 +229,24 @@ class Wav2VecCTCTrainer(Trainer):
                 pred_str + processor.tokenizer.eos_token)
             gec_train_data['orig'].append(
                 orig_str + processor.tokenizer.eos_token)
+        # beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
+        # # select best predection
+        # pred_ids = [beam_results[i][0][:out_lens[i][0]]
+        #             for i in range(out_lens.shape[0])]
+        # decoded_strings = processor.batch_decode(pred_ids)
+        # decoded_labels = processor.batch_decode(labels)
+        # for noise, orig in zip(decoded_strings, decoded_labels):
+        #     pred_str = join_jamos(noise)
+        #     pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
+        #     orig_str = join_jamos(orig)
+        #     orig_str = re.sub('<unk>|<s>|<\/s>', '', orig_str)
+        #     gec_train_data['noise'].append(
+        #         pred_str + processor.tokenizer.eos_token)
+        #     gec_train_data['orig'].append(
+        #         orig_str + processor.tokenizer.eos_token)
         # --------------- For future model training ------------------ #
 
         # Save past state if it exists
-        # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
 
@@ -262,8 +272,8 @@ def predict(dataset, is_submit=True):
         alpha=0,
         beta=0,
         cutoff_top_n=30,
-        cutoff_prob=0.5,
-        beam_width=50,
+        cutoff_prob=0.8,
+        beam_width=40,
         num_processes=8,
         blank_id=0,
         log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
@@ -389,6 +399,8 @@ def path_loader(root_path):
 
 
 if __name__ == "__main__":
+    # os.system('df -h')
+    # exit(0)
     parser = HfArgumentParser(
         (ModelArguments, DataTrainingArguments, TrainingArguments))
 
@@ -428,20 +440,20 @@ if __name__ == "__main__":
         model_path=None,
         alpha=0,
         beta=0,
-        cutoff_top_n=30,
-        cutoff_prob=0.5,
-        beam_width=50,
+        cutoff_top_n=1,
+        cutoff_prob=1.0,
+        beam_width=1,
         num_processes=8,
         blank_id=0,
         log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
     )
 
-    if data_args.mode == 'test':
-        path = Path('./model.arpa')
-        bind_file(str(path))
-        print("Loading kenlm...")
-        nsml.load(checkpoint='6', session='nia1030/final_stt_1/260')
-        print("Loading complete!")
+    # if data_args.mode == 'test':
+    #     path = Path('./model.arpa')
+    #     bind_file(str(path))
+    #     print("Loading kenlm...")
+    #     nsml.load(checkpoint='6', session='nia1030/final_stt_1/260')
+    #     print("Loading complete!")
 
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
@@ -467,11 +479,11 @@ if __name__ == "__main__":
 
     if data_args.mode == 'train':
         if model_args.data_type == 1:
-            print("No pretrained model yet")
-            # nsml.load(checkpoint='5', session='nia1030/final_stt_2/46')
+            print("Loading pretrained model with external data")
+            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
         elif model_args.data_type == 2:
-            print("No pretrained model yet")
-            # nsml.load(checkpoint='4', session='nia1030/final_stt_1/188')
+            print("Loading pretrained model with external data")
+            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
         # nsml.save(0)
         # exit()
         gec_train_data = {'noise': [], 'orig': []}
@@ -531,24 +543,34 @@ if __name__ == "__main__":
             cer = cer_metric.compute(predictions=pred_str,
                                      references=label_str)
 
+            noise = [re.sub('<unk>|<s>|<\/s>', '', x) for x in pred_str]
+            noise = [join_jamos(x)
+                     + processor.tokenizer.eos_token for x in noise]
+            orig = [re.sub('<unk>|<s>|<\/s>', '', x) for x in label_str]
+            orig = [join_jamos(x)
+                    + processor.tokenizer.eos_token for x in orig]
+            gec_val_data['noise'].extend(noise)
+            gec_val_data['orig'].extend(orig)
             # --------------- For future model training ------------------ #
-            logits = pred_logits
-            beam_results, beam_scores, timesteps, out_lens = decoder.decode(
-                torch.from_numpy(logits))
-            # select best predection
-            pred_ids = [beam_results[i][0][:out_lens[i][0]]
-                        for i in range(out_lens.shape[0])]
-            decoded_strings = processor.batch_decode(pred_ids)
-            for noise_str, orig_str in zip(decoded_strings, label_str):
-                pred = join_jamos(noise_str)
-                pred = re.sub('<unk>|<s>|<\/s>', '', pred)
-                orig = join_jamos(orig_str)
-                orig = re.sub('<unk>|<s>|<\/s>', '', orig)
-                gec_val_data['noise'].append(
-                    pred + processor.tokenizer.eos_token)
-                gec_val_data['orig'].append(
-                    orig + processor.tokenizer.eos_token)
-                # print(pred, orig)
+            # logits = pred_logits
+            # logits = np.array_split(logits, max(
+            #     len(logits) // data_args.cpu_batch_size, 1))
+            # for logit in logits:
+            #     beam_results, beam_score, timestep, out_lens = decoder.decode(
+            #         torch.from_numpy(logit))
+            #     # select best predection
+            #     pred_ids = [beam_results[i][0][:out_lens[i][0]]
+            #                 for i in range(out_lens.shape[0])]
+            #     decoded_strings = processor.batch_decode(pred_ids)
+            #     for noise_str, orig_str in zip(decoded_strings, label_str):
+            #         pred = join_jamos(noise_str)
+            #         pred = re.sub('<unk>|<s>|<\/s>', '', pred)
+            #         orig = join_jamos(orig_str)
+            #         orig = re.sub('<unk>|<s>|<\/s>', '', orig)
+            #         gec_val_data['noise'].append(
+            #             pred + processor.tokenizer.eos_token)
+            #         gec_val_data['orig'].append(
+            #             orig + processor.tokenizer.eos_token)
             # --------------- For future model training ------------------ #
 
             return {"wer": wer, "cer": cer}
