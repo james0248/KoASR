@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 from transformers import TrainingArguments
 
+
 @dataclass
 class ModelArguments:
     """
@@ -174,6 +175,10 @@ class DataTrainingArguments:
         },
     )
     writer_batch_size: Optional[int] = field(
+        default=1000,
+        metadata={"help": "Disk and memory"},
+    )
+    cpu_batch_size: Optional[int] = field(
         default=1000,
         metadata={"help": "Disk and memory"},
     )
