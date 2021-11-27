@@ -366,15 +366,15 @@ def bind_model(model, parser):
 
     def infer(test_path, **kwparser):
         test_file_list = path_loader(test_path)
-        if model_args.data_type and model_args.data_type==3:
+        if model_args.data_type and model_args.data_type == 3:
             return [(Path(test_file).name, predict_dialect(test_file, model, processor, device)) for test_file in test_file_list]
         else:
             test_dataset = prepare_dataset(test_file_list, None, processor,
-                                        data_args)
+                                           data_args)
             result_list = predict(test_dataset)
             try:
                 os.system(f'rm ./model.arpa')
-            else:
+            except:
                 pass
             prob = [1] * len(result_list)
 
@@ -512,8 +512,10 @@ if __name__ == "__main__":
                 label['no_header'] = label['file_name'].apply(
                     lambda row: int(row[3:]) < 118681)
             if model_args.data_type == 3:
-                label['json_path'] = label['path'].apply(lambda path: str(Path(path).parent / "train_info" / Path(path).name))
-                label['path'] = label['path'].apply(lambda path: str(Path(path).parent / "wav" / Path(path).name))
+                label['json_path'] = label['path'].apply(lambda path: str(
+                    Path(path).parent / "train_info" / Path(path).name))
+                label['path'] = label['path'].apply(lambda path: str(
+                    Path(path).parent / "wav" / Path(path).name))
             print("Loading competition data...")
             train_dataset, val_dataset = prepare_dataset(file_list,
                                                          label,
