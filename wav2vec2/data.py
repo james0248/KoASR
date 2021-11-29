@@ -212,7 +212,7 @@ def preprocess_dataset(batch, processor):
     return batch
 
 
-def prepare_dataset(file_list, df, processor, args, val_size=0.8, val_df=None):
+def prepare_dataset(file_list, df, processor, args, val_size=0.1, val_df=None):
     '''
     return train/val dataset or test dataset depending on args.mode
     # Arguments
@@ -273,9 +273,9 @@ def prepare_dataset(file_list, df, processor, args, val_size=0.8, val_df=None):
         val_data = load_from_disk('./val_temp')
 
         print(f"Number of data before filter: {len(train_data)+len(val_data)}")
-        
+
         if "json_path" in train_data.column_names:
-            return prepare_dataset_with_json(train_data,val_data,args,processor)
+            return prepare_dataset_with_json(train_data, val_data, args, processor)
 
         if args.use_external_data:
             train_data = train_data.map(
