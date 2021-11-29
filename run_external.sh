@@ -32,5 +32,5 @@ nsml run -e ./wav2vec2/main.py -d final_stt_1 \
     --disable_tqdm True
     --logging_steps 10
     --use_external_data True
-    --gdrive_code 4/0AX4XfWihNVpt-SloOyKwT-AeXfa_dx3RH7iIU-SbHlQZiATKY6DbAFMP-74yPVwR3f9Egg
+    --gdrive_code 4/0AX4XfWhPnCQN9Ewu90mw5CBcFU2hkGTeGt2B1g2dk9pwrn1AJnGEML5_hUAXZieyFueAqw
     " 
