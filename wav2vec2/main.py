@@ -266,15 +266,17 @@ def predict(dataset, is_submit=True):
     model.eval()
 
     result_list = []
+    use_beamdecode = False
+    use_gec = True
     decoder = CTCBeamDecoder(
         list(processor.tokenizer.get_vocab().keys()),
         # model_path='./model.arpa',
         model_path=None,
         alpha=0,
         beta=0,
-        cutoff_top_n=30,
-        cutoff_prob=0.8,
-        beam_width=40,
+        cutoff_top_n=50,
+        cutoff_prob=1,
+        beam_width=100,
         num_processes=8,
         blank_id=0,
         log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
@@ -301,44 +303,57 @@ def predict(dataset, is_submit=True):
             ).input_values.to(device)
 
         with torch.no_grad():
-            logits = model(input_values).logits
-        beam_results, beam_scores, timesteps, out_lens = decoder.decode(logits)
+            if not is_submit:
+                with autocast():
+                    logits = model(input_values).logits
+            else:
+                logits = model(input_values).logits
+        if use_beamdecode:
+            beam_results, beam_scores, timesteps, out_lens = decoder.decode(
+                logits)
         # select best predection
-        pred_ids = [beam_results[i][0][:out_lens[i][0]]
-                    for i in range(out_lens.shape[0])]
+            pred_ids = [beam_results[i][0][:out_lens[i][0]]
+                        for i in range(out_lens.shape[0])]
+        else:
+            pred_ids = np.argmax(logits.cpu(), axis=-1)
         decoded_strings = processor.batch_decode(pred_ids)
 
-        for i in range(out_lens.shape[0]):
-            pred_str = join_jamos(decoded_strings[i])
+        for pred_str in decoded_strings:
+            pred_str = join_jamos(pred_str)
             pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
             result_list.append(pred_str)
         return
+
     tic = time.perf_counter()
-    dataset.map(map_to_result, batched=True, batch_size=8)
+    dataset.map(map_to_result, batched=True, batch_size=16)
     toc = time.perf_counter()
     print(f"Wav2Vec took {toc-tic:.1f}s")
 
-    return result_list
+    if not use_gec:
+        return result_list
 
+    gec_dataset = Dataset.from_dict({"text": result_list})
     gec_result_list = []
 
-    def apply_gec():
-        for pred_str in result_list:
-            inputs = gec_tokenizer([pred_str], return_tensors='pt')
-            res_ids = gec_model.generate(
-                inputs['input_ids'],
-                max_length=30,
-                no_repeat_ngram_size=2,
-                early_stopping=True
-            )
-            res_str = [gec_tokenizer.decode(
-                g, skip_special_tokens=True) for g in res_ids]
+    def apply_gec(batch):
+        inputs = gec_tokenizer(
+            batch["text"], return_tensors='pt', padding=True)
+        res_ids = gec_model.generate(
+            inputs['input_ids'],
+            max_length=len(inputs['input_ids'][0]) + 5,
+            num_beams=10,
+            eos_token_id=gec_tokenizer.eos_token_id,
+            early_stopping=True
+        )
+        res_str = gec_tokenizer.batch_decode(res_ids, skip_special_tokens=True)
+        res_str = [re.sub('[^가-힣\s.,!?~]', '', s) for s in res_str]
 
-            gec_result_list.append(res_str[0])
+        gec_result_list.extend(res_str)
     tic = time.perf_counter()
-    apply_gec()
+    gec_dataset.map(apply_gec, batched=True, batch_size=128)
     toc = time.perf_counter()
-    print(f"gec took {toc-tic:.1f}s")
+    print(f"GEC took {toc-tic:.1f}s")
+
     return gec_result_list
 
 
@@ -483,15 +498,18 @@ if __name__ == "__main__":
         nsml.paused(scope=locals())
 
     if data_args.mode == 'train':
+        # stt2
         if model_args.data_type == 1:
-            print("Loading pretrained model with external data")
-            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
+            print("Loading pretrained model with stt2")
+            nsml.load(checkpoint='4', session='nia1030/final_stt_2/194')
+        # stt1
         elif model_args.data_type == 2:
-            print("Loading pretrained model with external data")
-            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
+            print("Loading pretrained model with stt1")
+            nsml.load(checkpoint='9', session='nia1030/final_stt_1/368')
+        # stt3
         elif model_args.data_type == 3:
             print("Loading pretrained model with external data")
-            nsml.load(checkpoint='0', session='nia1030/final_stt_1/356')
+            nsml.load(checkpoint='9', session='nia1030/final_stt_1/368')
 
         # nsml.save(0)
         # exit()
@@ -604,7 +622,7 @@ if __name__ == "__main__":
             num_training_steps=training_args.num_train_epochs *
             (len(train_dataset) // training_args.per_device_train_batch_size //
              training_args.gradient_accumulation_steps // training_args.world_size),
-            num_cycles=training_args.num_train_epochs
+            num_cycles=training_args.num_train_epochs,
         )
 
         trainer = Wav2VecCTCTrainer(
@@ -621,7 +639,6 @@ if __name__ == "__main__":
 
         print("Training start")
         try:
-            trainer.evaluate()
             trainer.train()
         except Exception as error:
             logging.exception(error)
