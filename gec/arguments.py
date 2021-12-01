@@ -141,6 +141,12 @@ class DataTrainingArguments:
         default=1000,
         metadata={"help": "Disk and memory"},
     )
+    use_processed_data: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Whether to use preprocessed data"
+        },
+    )
 
 
 @dataclass
