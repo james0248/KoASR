@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import warnings
 from nsml import DATASET_PATH
+from numpy.core.fromnumeric import argmin
 from arguments import ModelArguments, DataTrainingArguments, TrainingArguments
 from data import init_data, prepare_dataset
 from download import DatasetWrapper, bind_dataset, download_kenlm, get_external_data, bind_file
@@ -31,11 +32,13 @@ import torch
 import transformers
 from packaging import version
 from transformers.trainer_callback import TrainerControl, TrainerState
+import hunspell
+import itertools
 
 from transformers import (HfArgumentParser, Trainer,
                           Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor,
                           Wav2Vec2ForCTC, Wav2Vec2Processor, is_apex_available,
-                          trainer_utils, TrainerCallback, AutoTokenizer,
+                          trainer_utils, TrainerCallback, AutoTokenizer, AutoModelForMaskedLM,
                           AutoModelForPreTraining, BartForConditionalGeneration, BartTokenizerFast)
 
 
@@ -266,8 +269,8 @@ def predict(dataset, is_submit=True):
     model.eval()
 
     result_list = []
-    use_beamdecode = False
-    use_gec = True
+    use_beamdecode = True
+    use_gec = False
     decoder = CTCBeamDecoder(
         list(processor.tokenizer.get_vocab().keys()),
         # model_path='./model.arpa',
@@ -275,8 +278,8 @@ def predict(dataset, is_submit=True):
         alpha=0,
         beta=0,
         cutoff_top_n=50,
-        cutoff_prob=1,
-        beam_width=100,
+        cutoff_prob=1.0,
+        beam_width=150,
         num_processes=8,
         blank_id=0,
         log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
@@ -303,10 +306,7 @@ def predict(dataset, is_submit=True):
             ).input_values.to(device)
 
         with torch.no_grad():
-            if not is_submit:
-                with autocast():
-                    logits = model(input_values).logits
-            else:
+            with autocast():
                 logits = model(input_values).logits
         if use_beamdecode:
             beam_results, beam_scores, timesteps, out_lens = decoder.decode(
@@ -320,14 +320,11 @@ def predict(dataset, is_submit=True):
 
         for pred_str in decoded_strings:
             pred_str = join_jamos(pred_str)
-            pred_str = re.sub('<unk>|<s>|<\/s>', '', pred_str)
+            pred_str = re.sub('[^가-힣\s.,!?~]', '', pred_str)
             result_list.append(pred_str)
         return
 
-    tic = time.perf_counter()
     dataset.map(map_to_result, batched=True, batch_size=16)
-    toc = time.perf_counter()
-    print(f"Wav2Vec took {toc-tic:.1f}s")
 
     if not use_gec:
         return result_list
@@ -336,23 +333,37 @@ def predict(dataset, is_submit=True):
     gec_result_list = []
 
     def apply_gec(batch):
-        inputs = gec_tokenizer(
-            batch["text"], return_tensors='pt', padding=True)
-        res_ids = gec_model.generate(
-            inputs['input_ids'],
-            max_length=len(inputs['input_ids'][0]) + 5,
-            num_beams=10,
-            eos_token_id=gec_tokenizer.eos_token_id,
-            early_stopping=True
-        )
-        res_str = gec_tokenizer.batch_decode(res_ids, skip_special_tokens=True)
-        res_str = [re.sub('[^가-힣\s.,!?~]', '', s) for s in res_str]
+        for text in batch["text"]:
+            suggests = []
+            for s in text.split(' '):
+                t = hobj.suggest(s)
+                if len(t) is not 0 and s not in t[:min(2, len(t))]:
+                    suggests.append(t[:min(2, len(t))])
+                else:
+                    suggests.append([s])
+            suggest_text = list(itertools.product(*suggests))
+            suggest_text = list(map(lambda x: ' '.join(x), suggest_text))
+            print(suggest_text)
+            input_ids = gec_tokenizer(suggest_text)
+            with torch.no_grad():
+                result = gec_model(input_ids, labels=input_ids)
+            print(result)
+            # min_val = argmin(loss.item)
+            # gec_result_list.append(suggest_text[min_val])
+        # inputs = gec_tokenizer(
+        #     batch["text"], return_tensors='pt', padding=True)
+        # res_ids = gec_model.generate(
+        #     inputs['input_ids'],
+        #     max_length=len(inputs['input_ids'][0]) + 10,
+        #     num_beams=10,
+        #     eos_token_id=gec_tokenizer.eos_token_id,
+        #     early_stopping=True
+        # )
+        # res_str = gec_tokenizer.batch_decode(res_ids, skip_special_tokens=True)
+        # res_str = [re.sub('[^가-힣\s.,!?~]', '', s) for s in res_str]
 
-        gec_result_list.extend(res_str)
-    tic = time.perf_counter()
+        # gec_result_list.extend(res_str)
     gec_dataset.map(apply_gec, batched=True, batch_size=128)
-    toc = time.perf_counter()
-    print(f"GEC took {toc-tic:.1f}s")
 
     return gec_result_list
 
@@ -454,27 +465,6 @@ if __name__ == "__main__":
 
     # exit(0)
 
-    decoder = CTCBeamDecoder(
-        list(processor.tokenizer.get_vocab().keys()),
-        # model_path='./model.arpa',
-        model_path=None,
-        alpha=0,
-        beta=0,
-        cutoff_top_n=1,
-        cutoff_prob=1.0,
-        beam_width=1,
-        num_processes=8,
-        blank_id=0,
-        log_probs_input=True  # No softmax layer in Wav2Vec2ForCTC
-    )
-
-    # if data_args.mode == 'test':
-    #     path = Path('./model.arpa')
-    #     bind_file(str(path))
-    #     print("Loading kenlm...")
-    #     nsml.load(checkpoint='6', session='nia1030/final_stt_1/260')
-    #     print("Loading complete!")
-
     model = Wav2Vec2ForCTC.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -489,9 +479,19 @@ if __name__ == "__main__":
     )
     # print(model)
 
-    gec_tokenizer = BartTokenizerFast.from_pretrained("hyunwoongko/kobart")
-    gec_model = BartForConditionalGeneration.from_pretrained(
-        "hyunwoongko/kobart")
+    gec_tokenizer = AutoTokenizer.from_pretrained("monologg/kobert")
+    gec_model = AutoModelForMaskedLM.from_pretrained("monologg/kobert")
+
+    if data_args.mode == 'test':
+        # path = Path('./model.arpa')
+        # bind_file(str(path))
+        # print("Loading kenlm...")
+        # nsml.load(checkpoint='6', session='nia1030/final_stt_1/260')
+        # print("Loading complete!")
+        # bind_model(gec_model, training_args)
+        # nsml.load(checkpoint='109', session='nia1030/final_stt_2/298')
+        # hobj = hunspell.HunSpell('./hunspell/ko.dic', './hunspell/ko.aff')
+        pass
 
     bind_model(model, training_args)
     if model_args.pause:
@@ -501,7 +501,7 @@ if __name__ == "__main__":
         # stt2
         if model_args.data_type == 1:
             print("Loading pretrained model with stt2")
-            nsml.load(checkpoint='4', session='nia1030/final_stt_2/194')
+            nsml.load(checkpoint='0', session='nia1030/final_stt_2/307')
         # stt1
         elif model_args.data_type == 2:
             print("Loading pretrained model with stt1")
