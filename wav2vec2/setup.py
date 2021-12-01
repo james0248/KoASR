@@ -1,4 +1,4 @@
-# nsml: dacon/nia-pytorch:1.0
+# nsml: fifteenhundred/koasr:v2
 from distutils.core import setup
 
 setup(name='ladder_networks',
@@ -8,8 +8,9 @@ setup(name='ladder_networks',
           'transformers==4.12.3',
           'torch==1.10.0',
           'librosa',
-          'jiwer==2.2.0',
+          'jiwer==2.3.0',
           'hangul_utils',
           'gdown',
           'apex',
+          'hunspell'
       ])
