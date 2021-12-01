@@ -51,6 +51,21 @@ def filter_high_cer(batch):
     return error < 0.15 and 0 < error
 
 
+def filter_by_length(batch, tokenizer):
+    inputs = batch["noise"]
+    targets = batch["orig"]
+    model_inputs = tokenizer(inputs, padding=False)
+    with tokenizer.as_target_tokenizer():
+        lables = tokenizer(targets, padding=False)
+    if len(model_inputs["input_ids"]) < 5 or len(model_inputs["input_ids"]) > 50:
+        return False
+    if len(lables["input_ids"]) < 5 or len(lables["input_ids"]) > 50:
+        return False
+    if abs(len(model_inputs["input_ids"]) - len(lables["input_ids"])) > 10:
+        return False
+    return True
+
+
 def preprocess_function(batch, tokenizer, data_args):
     # Temporarily set max_target_length for training.
     max_target_length = data_args.max_target_length
@@ -77,21 +92,6 @@ def preprocess_function(batch, tokenizer, data_args):
     return model_inputs
 
 
-def check_diff(batch, tokenizer):
-    inputs = batch["noise"]
-    targets = batch["orig"]
-
-    model_inputs = tokenizer(inputs, padding=False)
-    with tokenizer.as_target_tokenizer():
-        lables = tokenizer(targets, padding=False)
-    for x, y in zip(model_inputs["input_ids"], lables["input_ids"]):
-        global diff, out_len, in_len
-        diff.append(len(x) - len(y))
-        out_len.append(len(y))
-        in_len.append(len(x))
-        print(len(diff))
-
-
 def fetch_dataset(data_dict):
     train_datasets = []
     val_datasets = []
@@ -109,11 +109,6 @@ def fetch_dataset(data_dict):
 
 
 def prepare_dataset(data_dict, tokenizer, args):
-    global diff, out_len, in_len
-    diff = []
-    out_len = []
-    in_len = []
-
     train_dataset, val_dataset = fetch_dataset(data_dict)
 
     print(
@@ -124,50 +119,43 @@ def prepare_dataset(data_dict, tokenizer, args):
     val_dataset = val_dataset.filter(
         filter_high_cer, num_proc=args.preprocessing_num_workers)
 
-    train_dataset = train_dataset.map(
-        check_diff,
-        batched=True,
-        num_proc=args.preprocessing_num_workers,
-        fn_kwargs={'tokenizer': tokenizer},
-    )
-
-    val_dataset = val_dataset.map(
-        check_diff,
-        batched=True,
-        num_proc=args.preprocessing_num_workers,
-        fn_kwargs={'tokenizer': tokenizer},
-    )
-
-    # print global variables
-    print(f"max_diff: {max(diff)}")
-    print(f"min_diff: {min(diff)}")
-    print(f"max_in_len: {max(in_len)}")
-    print(f"min_in_len: {min(in_len)}")
-    print(f"max_out_len: {max(out_len)}")
-    print(f"min_out_len: {min(out_len)}")
-    exit(0)
-
     print(
         f"Number of data after cer filter: {len(train_dataset)+len(val_dataset)}")
+
+    train_dataset = train_dataset.filter(
+        filter_by_length,
+        num_proc=args.preprocessing_num_workers,
+        fn_kwargs={'tokenizer': tokenizer},
+    )
+    val_dataset = val_dataset.filter(
+        filter_by_length,
+        num_proc=args.preprocessing_num_workers,
+        fn_kwargs={'tokenizer': tokenizer},
+    )
+
+    print(
+        f"Number of data after text filter: {len(train_dataset)+len(val_dataset)}")
     print("Start preprocess...")
 
     train_dataset = train_dataset.map(
         preprocess_function,
         batched=True,
         num_proc=args.preprocessing_num_workers,
-        remove_columns=train_dataset.columns,
+        remove_columns=train_dataset.column_names,
         fn_kwargs={'tokenizer': tokenizer, 'data_args': args},
     )
 
-    max_target_length = args.val_max_target_length
     val_dataset = val_dataset.map(
         preprocess_function,
         batched=True,
         num_proc=args.preprocessing_num_workers,
-        remove_columns=val_dataset.columns,
+        remove_columns=val_dataset.column_names,
         fn_kwargs={'tokenizer': tokenizer, 'data_args': args},
     )
 
     print("Preprocess done!")
+
+    bind_dataset(DatasetWrapper(train_dataset), DatasetWrapper(val_dataset))
+    nsml.save(1000)
 
     return train_dataset, val_dataset

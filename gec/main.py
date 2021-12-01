@@ -26,9 +26,9 @@ from transformers.trainer_callback import TrainerControl, TrainerState
 
 from transformers import (HfArgumentParser, is_apex_available, TrainerCallback,
                           BartForConditionalGeneration, BartTokenizerFast, set_seed,
-                          Seq2SeqTrainer, DataCollatorForSeq2Seq)
+                          Seq2SeqTrainer, DataCollatorForSeq2Seq, AutoModelForSeq2SeqLM, AutoTokenizer)
 
-from data import prepare_dataset
+from data import prepare_dataset, DatasetWrapper, bind_dataset
 
 warnings.filterwarnings(action='ignore')
 
@@ -41,9 +41,9 @@ if version.parse(torch.__version__) >= version.parse("1.6"):
 
 
 data_dict = {
-    # 'nia1030/final_stt_1/368': 10,
-    # 'nia1030/final_stt_3/69': 5,
-    # 'nia1030/final_stt_2/194': 5,
+    'nia1030/final_stt_1/368': 10,
+    'nia1030/final_stt_3/69': 5,
+    'nia1030/final_stt_2/194': 5,
     'nia1030/final_stt_2/199': 3,
 }
 
@@ -132,6 +132,7 @@ if __name__ == '__main__':
     # download model & vocab.
     tokenizer = BartTokenizerFast.from_pretrained(
         model_args.model_name_or_path,
+        use_fast=True,
         bos_token="<s>",
         eos_token="</s>",
         unk_token="<unk>",
@@ -178,8 +179,20 @@ if __name__ == '__main__':
     bind_model(model, training_args)
     if data_args.mode == 'train':
         print("Dataset preparation begin!")
-        train_dataset, val_dataset = prepare_dataset(
-            data_dict, tokenizer, data_args)
+        if data_args.use_processed_data:
+            train_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
+            val_dataset_wrapper = DatasetWrapper(Dataset.from_dict({}))
+            bind_dataset(train_dataset_wrapper, val_dataset_wrapper)
+            nsml.load(checkpoint='1000', session='nia1030/final_stt_2/260')
+            train_dataset = train_dataset_wrapper.dataset
+            val_dataset = val_dataset_wrapper.dataset.select(range(5000))
+            bind_dataset(DatasetWrapper(train_dataset),
+                         DatasetWrapper(val_dataset))
+            nsml.save(1000)
+            print(train_dataset[:5])
+        else:
+            train_dataset, val_dataset = prepare_dataset(
+                data_dict, tokenizer, data_args)
         print("Finished dataset preparation")
 
         bind_model(model, training_args)
@@ -209,6 +222,7 @@ if __name__ == '__main__':
 
         def compute_metrics(eval_preds):
             preds, labels = eval_preds
+            print(preds)
             if isinstance(preds, tuple):
                 preds = preds[0]
             decoded_preds = tokenizer.batch_decode(
@@ -254,6 +268,7 @@ if __name__ == '__main__':
             tokenizer=tokenizer,
             data_collator=data_collator,
             compute_metrics=compute_metrics,
+            callbacks=[NSMLCallback],
             optimizers=(optimizer, lr_scheduler),
         )
 
@@ -266,11 +281,3 @@ if __name__ == '__main__':
             print('error occured')
 
         print("Training done!")
-
-        # clear disk
-        train_dataset.cleanup_cache_files()
-        val_dataset.cleanup_cache_files()
-
-        shutil.rmtree('./train_temp')
-        shutil.rmtree('./val_temp')
-        print('Cleaning done!')
